@@ -10,7 +10,9 @@
             "includePath": [
                 "/home/andrew/codding/IoT/esp32-clock/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
+                "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Network/src",
+                "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
                 "/home/andrew/codding/IoT/esp32-clock/.pio/libdeps/esp32-c3-super-mini/U8g2/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src",
@@ -291,7 +293,6 @@
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/ESPmDNS/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FFat/src",
-                "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdate/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdateServer/src",
@@ -312,7 +313,6 @@
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Ticker/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/USB/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Update/src",
-                "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
                 "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Zigbee/src",
                 ""
@@ -322,7 +322,9 @@
                 "path": [
                     "/home/andrew/codding/IoT/esp32-clock/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
+                    "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Network/src",
+                    "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
                     "/home/andrew/codding/IoT/esp32-clock/.pio/libdeps/esp32-c3-super-mini/U8g2/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src",
@@ -603,7 +605,6 @@
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/ESPmDNS/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FFat/src",
-                    "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdate/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/HTTPUpdateServer/src",
@@ -624,7 +625,6 @@
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Ticker/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/USB/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Update/src",
-                    "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
                     "/home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Zigbee/src",
                     ""

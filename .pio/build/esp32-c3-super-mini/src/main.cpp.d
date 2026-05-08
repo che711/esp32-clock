@@ -187,6 +187,12 @@
  /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiServer.h \
  /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiUdp.h \
  /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/Network/src/NetworkUdp.h \
+ /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/WebServer.h \
+ /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/FS/src/FS.h \
+ /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/HTTP_Method.h \
+ /home/andrew/.platformio/packages/framework-arduinoespressif32-libs/esp32c3/include/http_parser/http_parser.h \
+ /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/Uri.h \
+ /home/andrew/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/detail/RequestHandler.h \
  .pio/libdeps/esp32-c3-super-mini/U8g2/src/U8g2lib.h \
  .pio/libdeps/esp32-c3-super-mini/U8g2/src/U8x8lib.h \
  .pio/libdeps/esp32-c3-super-mini/U8g2/src/clib/u8x8.h \
