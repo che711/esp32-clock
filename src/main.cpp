@@ -145,4 +145,3 @@ void loop() {
     drawClock();
     delay(1000);
 }
-
