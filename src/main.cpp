@@ -14,19 +14,20 @@ const char* NTP_SERVER = "pool.ntp.org";
 const long  GMT_OFFSET = 3600;   // UTC+1 (CET, Польша зимой)
 const int   DST_OFFSET = 3600;   // +1 час летом (CEST)
 
-// ─── Пины SPI → SSD1322 ──────────────────────────────────
+// ─── Пины (программный SPI) ──────────────────────────────
 #define PIN_CLK  6
 #define PIN_DIN  7
 #define PIN_CS   10
 #define PIN_DC   1
 #define PIN_RST  3
 
-U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
-
+// ─── Дисплей ─────────────────────────────────────────────
+U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI
+    u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
 
 WebServer server(80);
 
-// ─── Строки дата/время ───────────────────────────────────
+// ─── Строки ──────────────────────────────────────────────
 const char* DAYS[] = {
     "SUN","MON","TUE","WED","THU","FRI","SAT"
 };
@@ -35,18 +36,16 @@ const char* MONTHS[] = {
     "JUL","AUG","SEP","OCT","NOV","DEC"
 };
 
-
-char timeBuf[9];
-char dateBuf[20];
-char dayBuf[20];
+char timeBuf[9];    // "HH:MM:SS"
+char dateBuf[20];   // "09 MAY 2026"
+char dayBuf[5];     // "FRI"
 bool timeSynced = false;
 String localIP = "";
 
 // ─── HTML страница ────────────────────────────────────────
-// Отдаётся один раз, потом JS опрашивает /api/time каждую секунду
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -123,7 +122,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div id="time">--:--:--</div>
   <hr class="divider">
   <div id="date">-- --- ----</div>
-  <div id="day">-------</div>
+  <div id="day">---</div>
 </div>
 <div class="status"><span class="dot"></span>ESP32 SUPER MINI · NTP SYNC</div>
 
@@ -150,7 +149,6 @@ void handleRoot() {
 }
 
 void handleApiTime() {
-    // Отдаём JSON: {"time":"12:34:56","date":"08 МАЙ 2026","day":"ПЯТНИЦА"}
     char json[128];
     snprintf(json, sizeof(json),
              "{\"time\":\"%s\",\"date\":\"%s\",\"day\":\"%s\"}",
@@ -162,7 +160,7 @@ void handleNotFound() {
     server.send(404, "text/plain", "Not found");
 }
 
-// ─── Инициализация ────────────────────────────────────────
+// ─── WiFi + NTP ───────────────────────────────────────────
 void connectWifi() {
     Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
@@ -196,6 +194,7 @@ void syncNTP() {
     Serial.println(timeSynced ? " OK" : " TIMEOUT");
 }
 
+// ─── Обновление буферов времени ──────────────────────────
 void updateTimeStrings() {
     struct tm t;
     if (getLocalTime(&t)) {
@@ -203,28 +202,30 @@ void updateTimeStrings() {
                  "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
         snprintf(dateBuf, sizeof(dateBuf),
                  "%02d %s %04d", t.tm_mday, MONTHS[t.tm_mon], t.tm_year + 1900);
-        snprintf(dayBuf,  sizeof(dayBuf), "%s", DAYS[t.tm_wday]);
+        snprintf(dayBuf, sizeof(dayBuf),
+                 "%s", DAYS[t.tm_wday]);
     } else {
         snprintf(timeBuf, sizeof(timeBuf), "--:--:--");
         snprintf(dateBuf, sizeof(dateBuf), "-- --- ----");
-        snprintf(dayBuf,  sizeof(dayBuf),  "-------");
+        snprintf(dayBuf,  sizeof(dayBuf),  "---");
     }
 }
 
+// ─── Отрисовка дисплея ───────────────────────────────────
 void drawOLED() {
     u8g2.clearBuffer();
 
-    // Время — максимально крупно, на весь экран
+    // Время — максимально крупно
     u8g2.setFont(u8g2_font_logisoso46_tr);
     int tw = u8g2.getStrWidth(timeBuf);
     u8g2.drawStr((256 - tw) / 2, 50, timeBuf);
 
-    // Тонкая линия-разделитель
+    // Разделитель
     u8g2.drawHLine(0, 53, 256);
 
     // Нижняя строка: дата слева, IP справа
     u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(2, 63, dateBuf);   // "09 MAY 2026"
+    u8g2.drawStr(2, 63, dateBuf);
 
     if (localIP.length()) {
         int iw = u8g2.getStrWidth(localIP.c_str());
@@ -244,13 +245,12 @@ void setup() {
     Serial.begin(115200);
     delay(300);
 
+    // Заставка
     u8g2.begin();
     u8g2.setContrast(200);
-
-    // Заставка
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(60, 35, "Connecting WiFi...");
+    u8g2.drawStr(50, 35, "Connecting WiFi...");
     u8g2.sendBuffer();
 
     connectWifi();
@@ -265,7 +265,7 @@ void setup() {
 }
 
 void loop() {
-    server.handleClient();   // обрабатываем входящие запросы
+    server.handleClient();
     updateTimeStrings();
     drawOLED();
     delay(1000);
