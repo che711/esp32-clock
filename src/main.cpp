@@ -6,7 +6,7 @@
 #include <SPI.h>
 
 // ─── WiFi ────────────────────────────────────────────────
-const char* WIFI_SSID = "network";
+const char* WIFI_SSID = "SkyNet";
 const char* WIFI_PASS = "password";
 
 // ─── NTP ─────────────────────────────────────────────────
@@ -15,24 +15,26 @@ const long  GMT_OFFSET = 3600;   // UTC+1 (CET, Польша зимой)
 const int   DST_OFFSET = 3600;   // +1 час летом (CEST)
 
 // ─── Пины SPI → SSD1322 ──────────────────────────────────
-#define PIN_CS   5
-#define PIN_DC   4
+#define PIN_CLK  6
+#define PIN_DIN  7
+#define PIN_CS   10
+#define PIN_DC   1
 #define PIN_RST  3
 
-U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI
-    u8g2(U8G2_R0, PIN_CS, PIN_DC, PIN_RST);
+U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
+
 
 WebServer server(80);
 
 // ─── Строки дата/время ───────────────────────────────────
 const char* DAYS[] = {
-    "ВОСКРЕСЕНЬЕ","ПОНЕДЕЛЬНИК","ВТОРНИК",
-    "СРЕДА","ЧЕТВЕРГ","ПЯТНИЦА","СУББОТА"
+    "SUN","MON","TUE","WED","THU","FRI","SAT"
 };
 const char* MONTHS[] = {
-    "ЯНВ","ФЕВ","МАР","АПР","МАЙ","ИЮН",
-    "ИЮЛ","АВГ","СЕН","ОКТ","НОЯ","ДЕК"
+    "JAN","FEB","MAR","APR","MAY","JUN",
+    "JUL","AUG","SEP","OCT","NOV","DEC"
 };
+
 
 char timeBuf[9];
 char dateBuf[20];
@@ -212,29 +214,26 @@ void updateTimeStrings() {
 void drawOLED() {
     u8g2.clearBuffer();
 
-    // Время — крупно
-    u8g2.setFont(u8g2_font_logisoso32_tr);
+    // Время — максимально крупно, на весь экран
+    u8g2.setFont(u8g2_font_logisoso46_tr);
     int tw = u8g2.getStrWidth(timeBuf);
-    u8g2.drawStr((256 - tw) / 2, 36, timeBuf);
+    u8g2.drawStr((256 - tw) / 2, 50, timeBuf);
 
-    // Разделитель
-    u8g2.drawHLine(0, 40, 256);
+    // Тонкая линия-разделитель
+    u8g2.drawHLine(0, 53, 256);
 
-    // Дата и день недели
-    u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(4, 54, dateBuf);
-    int dw = u8g2.getStrWidth(dayBuf);
-    u8g2.drawStr(252 - dw, 54, dayBuf);
+    // Нижняя строка: дата слева, IP справа
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(2, 63, dateBuf);   // "09 MAY 2026"
 
-    // IP-адрес внизу (мелко)
     if (localIP.length()) {
-        u8g2.setFont(u8g2_font_5x7_tr);
-        u8g2.drawStr(4, 63, localIP.c_str());
+        int iw = u8g2.getStrWidth(localIP.c_str());
+        u8g2.drawStr(254 - iw, 63, localIP.c_str());
     }
 
     if (!timeSynced) {
-        u8g2.setFont(u8g2_font_5x7_tr);
-        u8g2.drawStr(200, 63, "NO NTP");
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(110, 63, "NO NTP");
     }
 
     u8g2.sendBuffer();
