@@ -6,8 +6,8 @@
 #include <SPI.h>
 
 // ─── WiFi ────────────────────────────────────────────────
-const char* WIFI_SSID = "YOUR_SSID";
-const char* WIFI_PASS = "YOUR_PASSWORD";
+const char* WIFI_SSID = "network";
+const char* WIFI_PASS = "password";
 
 // ─── NTP ─────────────────────────────────────────────────
 const char* NTP_SERVER = "pool.ntp.org";
