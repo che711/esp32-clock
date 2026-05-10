@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+
+  # ── Нативные тесты (без железа) ──────────────────────────
+  test:
+    name: Native Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: ${{ runner.os }}-pio-native-${{ hashFiles('platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-native-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Run native tests
+        run: pio test -e native --verbose
+
+  # ── Сборка прошивки ───────────────────────────────────────
+  build:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    needs: test   # сборка только если тесты прошли
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: ${{ runner.os }}-pio-esp32-${{ hashFiles('platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-esp32-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -e esp32-c3-super-mini
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            .pio/build/esp32-c3-super-mini/firmware.bin
+            .pio/build/esp32-c3-super-mini/firmware.elf
+          retention-days: 30
+
+  # ── Проверка кода ─────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck \
+            --enable=warning,style,performance \
+            --suppress=missingIncludeSystem \
+            --suppress=unusedFunction \
+            --error-exitcode=1 \
+            --inline-suppr \
+            src/clock_utils.h \
+            test/test_native/test_main.cpp
