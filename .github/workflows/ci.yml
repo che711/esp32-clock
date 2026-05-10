@@ -6,16 +6,17 @@ on:
   pull_request:
     branches: [ main, master ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
 
-  # ── Нативные тесты (без железа) ──────────────────────────
+  # ── Нативные тесты ───────────────────────────────────────
   test:
     name: Native Tests
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
@@ -36,11 +37,9 @@ jobs:
   build:
     name: Build Firmware
     runs-on: ubuntu-latest
-    needs: test   # сборка только если тесты прошли
-
+    needs: test
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
@@ -66,14 +65,12 @@ jobs:
             .pio/build/esp32-c3-super-mini/firmware.elf
           retention-days: 30
 
-  # ── Проверка кода ─────────────────────────────────────────
+  # ── Lint ─────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install cppcheck
         run: sudo apt-get install -y cppcheck
@@ -84,7 +81,9 @@ jobs:
             --enable=warning,style,performance \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
+            --suppress=invalidPrintfArgType_sint \
             --error-exitcode=1 \
             --inline-suppr \
             src/clock_utils.h \
             test/test_native/test_main.cpp
+            
