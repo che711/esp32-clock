@@ -88,4 +88,3 @@ jobs:
             --inline-suppr \
             src/clock_utils.h \
             test/test_native/test_main.cpp
-            
