@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <WebSocketsServer.h>
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
@@ -26,7 +27,8 @@ const int   DST_OFFSET = 3600;
 U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI
     u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
 
-WebServer server(80);
+WebServer        server(80);
+WebSocketsServer webSocket(81);
 
 // ─── Строки ──────────────────────────────────────────────
 const char* DAYS_SHORT[] = { "SUN","MON","TUE","WED","THU","FRI","SAT" };
@@ -41,12 +43,37 @@ char dayFullBuf[12];
 bool timeSynced = false;
 String localIP  = "";
 
-// ─── CPU load ─────────────────────────────────────────────
-// Измеряем время работы loop() без delay — как % от 100мс цикла
+// ─── CPU ─────────────────────────────────────────────────
 static float cpuLoadPct = 0.0f;
+uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0, 99); }
 
-uint8_t getCpuLoad() {
-    return (uint8_t)constrain(cpuLoadPct, 0, 99);
+// ─── Автояркость ─────────────────────────────────────────
+uint8_t     currentContrast = 200;
+const char* brightnessLabel = "Day";
+
+void updateBrightness() {
+    if (!timeSynced) return;
+    struct tm t;
+    if (!getLocalTime(&t)) return;
+    int h = t.tm_hour;
+
+    uint8_t    newC;
+    const char* newL;
+    if      (h >= 22 || h < 6) { newC = 15;  newL = "Night";   }
+    else if (h < 8)             { newC = 80;  newL = "Morning"; }
+    else if (h < 20)            { newC = 200; newL = "Day";     }
+    else                        { newC = 120; newL = "Evening"; }
+
+    if (newC != currentContrast) {
+        currentContrast = newC;
+        brightnessLabel = newL;
+        u8g2.setContrast(currentContrast);
+        Serial.printf("Brightness → %s (%d)\n", brightnessLabel, currentContrast);
+    }
+}
+
+uint8_t getBrightnessPct() {
+    return (uint8_t)(currentContrast * 100 / 200);
 }
 
 // ─── Uptime ───────────────────────────────────────────────
@@ -61,14 +88,9 @@ String getUptime() {
     return String(buf);
 }
 
-// ─── HTTP ─────────────────────────────────────────────────
-void handleRoot() {
-    server.send_P(200, "text/html", INDEX_HTML);
-}
-
-void handleApiStats() {
-    char json[512];
-    snprintf(json, sizeof(json),
+// ─── JSON builder (HTTP + WebSocket) ─────────────────────
+void buildJson(char* buf, size_t sz) {
+    snprintf(buf, sz,
         "{"
         "\"time\":\"%s\","
         "\"date\":\"%s\","
@@ -80,35 +102,39 @@ void handleApiStats() {
         "\"temp\":\"%.1f\","
         "\"cpu\":%d,"
         "\"ram_free\":%lu,"
-        "\"ram_total\":%lu"
+        "\"ram_total\":%lu,"
+        "\"brightness_pct\":%d,"
+        "\"brightness_label\":\"%s\""
         "}",
         timeBuf, dateBuf, dayFullBuf,
         getUptime().c_str(),
-        WIFI_SSID,
-        localIP.c_str(),
+        WIFI_SSID, localIP.c_str(),
         (int)WiFi.RSSI(),
         (float)temperatureRead(),
         getCpuLoad(),
         (unsigned long)esp_get_free_heap_size(),
-        (unsigned long)ESP.getHeapSize()
+        (unsigned long)ESP.getHeapSize(),
+        getBrightnessPct(),
+        brightnessLabel
     );
+}
+
+// ─── HTTP ─────────────────────────────────────────────────
+void handleRoot() { server.send_P(200, "text/html", INDEX_HTML); }
+
+void handleApiStats() {
+    char json[640];
+    buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
 
 void handleApiTime() {
     char json[256];
     snprintf(json, sizeof(json),
-        "{"
-        "\"time\":\"%s\","
-        "\"date\":\"%s\","
-        "\"day\":\"%s\","
-        "\"uptime\":\"%s\","
-        "\"timestamp\":%lu"
-        "}",
+        "{\"time\":\"%s\",\"date\":\"%s\",\"day\":\"%s\","
+        "\"uptime\":\"%s\",\"timestamp\":%lu}",
         timeBuf, dateBuf, dayFullBuf,
-        getUptime().c_str(),
-        (unsigned long)time(nullptr)
-    );
+        getUptime().c_str(), (unsigned long)time(nullptr));
     server.send(200, "application/json", json);
 }
 
@@ -118,8 +144,17 @@ void handleReboot() {
     ESP.restart();
 }
 
-void handleNotFound() {
-    server.send(404, "text/plain", "Not found");
+void handleNotFound() { server.send(404, "text/plain", "Not found"); }
+
+// ─── WebSocket ────────────────────────────────────────────
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+    if (type == WStype_CONNECTED) {
+        // Сразу отправляем свежие данные новому клиенту
+        char json[640];
+        buildJson(json, sizeof(json));
+        webSocket.sendTXT(num, json);
+        Serial.printf("WS client #%d connected\n", num);
+    }
 }
 
 // ─── WiFi + NTP ───────────────────────────────────────────
@@ -234,25 +269,34 @@ void setup() {
     server.on("/api/reboot", HTTP_POST, handleReboot);
     server.onNotFound(handleNotFound);
     server.begin();
-    Serial.println("HTTP server started");
+
+    webSocket.begin();
+    webSocket.onEvent(webSocketEvent);
+
+    Serial.printf("HTTP on :80, WebSocket on :81\n");
 }
 
 void loop() {
-    uint32_t workStart = micros();
+    uint32_t t0 = micros();
 
     server.handleClient();
+    webSocket.loop();
     updateTimeStrings();
 
     if (strcmp(timeBuf, prevTimeBuf) != 0) {
+        updateBrightness();
         drawOLED();
         strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+
+        // Push всем WebSocket клиентам раз в секунду
+        char json[640];
+        buildJson(json, sizeof(json));
+        webSocket.broadcastTXT(json);
     }
 
-    uint32_t workUs = micros() - workStart;
-
-    // Скользящее среднее загрузки CPU (work time / 100ms цикл)
-    float sample = (float)workUs / 1000.0f; // мс на работу
-    cpuLoadPct = cpuLoadPct * 0.85f + sample * 0.15f;
+    uint32_t workUs = micros() - t0;
+    float sample = (float)workUs / 1000.0f;
+    cpuLoadPct = cpuLoadPct * 0.88f + (sample / 100.0f * 100.0f) * 0.12f;
 
     delay(100);
 }
