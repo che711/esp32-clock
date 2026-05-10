@@ -9,7 +9,7 @@
 #include "clock_utils.h"
 
 // ─── WiFi ────────────────────────────────────────────────
-const char* WIFI_SSID = "network";
+const char* WIFI_SSID = "SkyNet";
 const char* WIFI_PASS = "password";
 
 // ─── NTP ─────────────────────────────────────────────────
@@ -44,26 +44,36 @@ char dayFullBuf[12];
 bool timeSynced   = false;
 String localIP    = "";
 
-// ─── Счётчик запросов ─────────────────────────────────────
-static uint32_t requestCount = 0;
+// ─── Состояние ───────────────────────────────────────────
+static uint32_t requestCount    = 0;
+static float    cpuLoadPct      = 0.0f;
+static bool     displayOn       = true;
+static uint8_t  currentContrast = 200;
+static bool     manualBrightness = false;
+const char*     brightnessLabel  = "Day";
 
-// ─── CPU ─────────────────────────────────────────────────
-static float cpuLoadPct = 0.0f;
 uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0, 99); }
 
-// ─── Яркость ─────────────────────────────────────────────
-uint8_t     currentContrast  = 200;
-const char* brightnessLabel  = "Day";
-bool        manualBrightness = false; // true = пользователь задал вручную
+// ─── Дисплей вкл/выкл ────────────────────────────────────
+void setDisplayPower(bool on) {
+    displayOn = on;
+    if (on) {
+        u8g2.setPowerSave(0);
+        u8g2.setContrast(currentContrast);
+    } else {
+        u8g2.setPowerSave(1); // OLED переходит в режим сна
+    }
+    Serial.printf("Display power → %s\n", on ? "ON" : "OFF");
+}
 
+// ─── Яркость ─────────────────────────────────────────────
 void applyContrast(uint8_t val, const char* label) {
     currentContrast = val;
     brightnessLabel = label;
-    u8g2.setContrast(currentContrast);
+    if (displayOn) u8g2.setContrast(currentContrast);
 }
 
 void updateBrightness() {
-    // Автояркость работает только если пользователь не выставил вручную
     if (manualBrightness || !timeSynced) return;
     struct tm t;
     if (!getLocalTime(&t)) return;
@@ -99,6 +109,7 @@ void buildJson(char* buf, size_t sz) {
         "\"brightness_pct\":%d,"
         "\"brightness_label\":\"%s\","
         "\"brightness_manual\":%s,"
+        "\"display_on\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -112,8 +123,15 @@ void buildJson(char* buf, size_t sz) {
         (int)(currentContrast * 100 / 255),
         brightnessLabel,
         manualBrightness ? "true" : "false",
+        displayOn        ? "true" : "false",
         (unsigned long)requestCount
     );
+}
+
+void broadcastState() {
+    char json[720];
+    buildJson(json, sizeof(json));
+    webSocket.broadcastTXT(json);
 }
 
 // ─── HTTP ─────────────────────────────────────────────────
@@ -124,7 +142,7 @@ void handleRoot() {
 
 void handleApiStats() {
     requestCount++;
-    char json[700];
+    char json[720];
     buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
@@ -140,38 +158,46 @@ void handleApiTime() {
     server.send(200, "application/json", json);
 }
 
-// POST /api/brightness  body: value=0..100  или  auto=1
 void handleApiBrightness() {
     requestCount++;
 
     if (server.hasArg("auto")) {
         manualBrightness = false;
         server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
-        Serial.println("Brightness → auto mode");
+        Serial.println("Brightness → auto");
+        broadcastState();
         return;
     }
 
     if (server.hasArg("value")) {
-        int pct = server.arg("value").toInt();
-        pct = constrain(pct, 0, 100);
-        uint8_t contrast = (uint8_t)(pct * 255 / 100);
+        int pct = constrain(server.arg("value").toInt(), 0, 100);
         manualBrightness = true;
-        applyContrast(contrast, "Manual");
-
+        applyContrast((uint8_t)(pct * 255 / 100), "Manual");
         char resp[64];
         snprintf(resp, sizeof(resp),
                  "{\"ok\":true,\"mode\":\"manual\",\"pct\":%d}", pct);
         server.send(200, "application/json", resp);
-        Serial.printf("Brightness → manual %d%% (contrast %d)\n", pct, contrast);
-
-        // Сразу пушим обновление всем WS-клиентам
-        char json[700];
-        buildJson(json, sizeof(json));
-        webSocket.broadcastTXT(json);
+        Serial.printf("Brightness → manual %d%%\n", pct);
+        broadcastState();
         return;
     }
 
     server.send(400, "application/json", "{\"error\":\"missing value or auto\"}");
+}
+
+void handleApiPower() {
+    requestCount++;
+    if (server.hasArg("on")) {
+        bool on = server.arg("on") != "0";
+        setDisplayPower(on);
+        char resp[48];
+        snprintf(resp, sizeof(resp),
+                 "{\"ok\":true,\"display_on\":%s}", on ? "true" : "false");
+        server.send(200, "application/json", resp);
+        broadcastState();
+        return;
+    }
+    server.send(400, "application/json", "{\"error\":\"missing on param\"}");
 }
 
 void handleReboot() {
@@ -190,7 +216,7 @@ void handleNotFound() {
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
         requestCount++;
-        char json[700];
+        char json[720];
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
@@ -247,6 +273,8 @@ void updateTimeStrings() {
 
 // ─── Дисплей ─────────────────────────────────────────────
 void drawOLED() {
+    if (!displayOn) return;
+
     u8g2.clearBuffer();
 
     char hh[3] = { timeBuf[0], timeBuf[1], 0 };
@@ -307,6 +335,7 @@ void setup() {
     server.on("/api/stats",       HTTP_GET,  handleApiStats);
     server.on("/api/time",        HTTP_GET,  handleApiTime);
     server.on("/api/brightness",  HTTP_POST, handleApiBrightness);
+    server.on("/api/power",       HTTP_POST, handleApiPower);
     server.on("/api/reboot",      HTTP_POST, handleReboot);
     server.onNotFound(handleNotFound);
     server.begin();
@@ -328,10 +357,7 @@ void loop() {
         updateBrightness();
         drawOLED();
         strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
-
-        char json[700];
-        buildJson(json, sizeof(json));
-        webSocket.broadcastTXT(json);
+        broadcastState();
     }
 
     uint32_t workUs = micros() - t0;
