@@ -10,9 +10,9 @@ inline void formatUptime(uint32_t totalSeconds, char* buf, size_t sz) {
     uint32_t h = s / 3600;  s %= 3600;
     uint32_t m = s / 60;    s %= 60;
     if (d > 0)
-        snprintf(buf, sz, "%dd %02dh %02dm %02ds", d, h, m, s);
+        snprintf(buf, sz, "%ud %02uh %02um %02us", d, h, m, s);
     else
-        snprintf(buf, sz, "%02dh %02dm %02ds", h, m, s);
+        snprintf(buf, sz, "%02uh %02um %02us", h, m, s);
 }
 
 // ─── Яркость по часу ─────────────────────────────────────
