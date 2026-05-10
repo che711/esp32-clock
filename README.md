@@ -1,13 +1,16 @@
 ### Simple api data
 
-# Получить время
-curl http://192.168.1.33/api/time
+# Getting time
+curl http://<ip_clock>/api/time
 
-# Красиво отформатировать
-curl -s http://192.168.1.33/api/time | python3 -m json.tool
+# Formated time
+curl -s http://<ip_clock>/api/time | python3 -m json.tool
 
-# Только время в строку
-curl -s http://192.168.1.33/api/time | grep -o '"time":"[^"]*"'
+# Only time in the line
+curl -s http://<ip_clock>/api/time | grep -o '"time":"[^"]*"'
 
-# Полная статистика
-curl http://192.168.1.33/api/stats
+# Full stats
+curl http://<ip_clock>/api/stats
+
+# Reboot of the clok:
+curl http://<ip_clock>//api/reboot
