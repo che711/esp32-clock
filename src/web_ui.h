@@ -24,6 +24,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     --btn-bg:      #1a2e5c;
     --btn-color:   #7ab0ff;
     --wifi-off:    #1a3a70;
+    --slider-bg:   #0a1525;
   }
 
   [data-theme="light"] {
@@ -39,39 +40,30 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     --btn-bg:      #d0e4ff;
     --btn-color:   #1a3a8a;
     --wifi-off:    #b0c8f0;
+    --slider-bg:   #c0d4f0;
   }
 
   body {
-    background: var(--bg);
-    color: var(--text);
+    background: var(--bg); color: var(--text);
     font-family: 'Inter', system-ui, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 28px 16px;
-    gap: 12px;
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 28px 16px; gap: 12px;
     transition: background 0.3s, color 0.3s;
   }
 
   .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    width: min(540px, 100%);
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 18px; width: min(540px, 100%);
     transition: background 0.3s, border-color 0.3s;
   }
 
-  /* ── Кнопка темы ── */
   .theme-btn {
     position: fixed; top: 14px; right: 14px;
-    width: 40px; height: 40px;
-    border-radius: 50%;
+    width: 40px; height: 40px; border-radius: 50%;
     background: var(--card); border: 1px solid var(--border);
-    color: var(--text-dim); font-size: 18px;
-    cursor: pointer; display: flex;
-    align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 18px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
     z-index: 50; transition: background 0.2s, border-color 0.2s;
   }
   .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -81,9 +73,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   #time {
     font-family: 'JetBrains Mono', monospace;
-    font-size: clamp(44px, 10vw, 82px);
-    font-weight: 700; letter-spacing: -1px;
-    line-height: 1; color: var(--text); white-space: nowrap;
+    font-size: clamp(44px, 10vw, 82px); font-weight: 700;
+    letter-spacing: -1px; line-height: 1;
+    color: var(--text); white-space: nowrap;
   }
 
   .divider { border: none; border-top: 1px solid var(--border); margin: 18px 0 14px; }
@@ -92,7 +84,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     font-size: clamp(15px, 3.5vw, 20px); font-weight: 600;
     color: var(--text-dim); letter-spacing: 3px; text-transform: uppercase;
   }
-
   #day {
     font-size: clamp(12px, 2.5vw, 15px); font-weight: 500;
     color: var(--text-faint); letter-spacing: 5px;
@@ -101,49 +92,97 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   /* ── Статистика ── */
   .stats-card { padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
-
-  .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-
-  .stat { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-  .stat.full { grid-column: span 2; }
+  .stats-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .stat       { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 
   .stat-label {
-    font-size: 11px; font-weight: 700;
-    color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase;
+    font-size: 11px; font-weight: 700; color: var(--text-faint);
+    letter-spacing: 1.5px; text-transform: uppercase;
   }
-
   .stat-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 17px; font-weight: 500; color: var(--text);
-    line-height: 1.3; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis;
+    font-family: 'JetBrains Mono', monospace; font-size: 17px;
+    font-weight: 500; color: var(--text); line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-
   .unit { font-size: 13px; color: var(--text-dim); margin-left: 2px; }
 
-  /* request counter badge */
-  .req-badge {
-    display: inline-flex; align-items: center; gap: 6px;
-  }
-  .req-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--accent); flex-shrink: 0;
-    animation: pulse-dot 2s infinite;
-  }
+  /* request dot */
+  .req-badge { display: inline-flex; align-items: center; gap: 6px; }
+  .req-dot   { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: pulse-dot 2s infinite; }
   @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
 
-  /* WiFi dots */
-  .wifi-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* WiFi */
+  .wifi-row  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .wifi-dots { display: inline-flex; gap: 3px; align-items: flex-end; }
   .wifi-dots span { display: inline-block; width: 6px; border-radius: 2px; background: var(--wifi-off); }
   .wifi-dots span.on { background: var(--accent); }
 
   /* CPU bar */
-  .cpu-row { display: flex; align-items: center; gap: 10px; }
-  .cpu-mini-bar { flex: 1; height: 5px; background: var(--curl-bg); border-radius: 3px; overflow: hidden; max-width: 80px; }
+  .cpu-row     { display: flex; align-items: center; gap: 10px; }
+  .cpu-mini-bar  { flex: 1; height: 5px; background: var(--slider-bg); border-radius: 3px; overflow: hidden; max-width: 80px; }
   .cpu-mini-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 1s ease; }
   .cpu-mini-fill.warn { background: #d97706; }
   .cpu-mini-fill.crit { background: #dc2626; }
+
+  /* ── Слайдер яркости ── */
+  .brightness-card { padding: 20px 24px; }
+
+  .brightness-header {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 14px;
+  }
+  .brightness-title {
+    font-size: 11px; font-weight: 700; color: var(--text-faint);
+    letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .brightness-mode {
+    display: flex; gap: 6px;
+  }
+  .mode-btn {
+    font-size: 11px; font-weight: 600; letter-spacing: 1px;
+    padding: 4px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent; color: var(--text-faint);
+    transition: all 0.2s; text-transform: uppercase;
+  }
+  .mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mode-btn:hover:not(.active) { border-color: var(--accent); color: var(--text-dim); }
+
+  .slider-row { display: flex; align-items: center; gap: 14px; }
+
+  .brightness-icon { font-size: 14px; flex-shrink: 0; opacity: 0.6; }
+
+  /* Стилизация range input */
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    flex: 1; height: 6px;
+    background: var(--slider-bg); border-radius: 3px; outline: none;
+    cursor: pointer;
+    background-image: linear-gradient(var(--accent), var(--accent));
+    background-size: 50% 100%;
+    background-repeat: no-repeat;
+    transition: background-size 0.1s;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; border: 2px solid var(--accent);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    cursor: pointer; transition: transform 0.15s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; border: 2px solid var(--accent);
+    cursor: pointer;
+  }
+  input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
+  input[type="range"]:disabled::-webkit-slider-thumb { cursor: not-allowed; transform: none; }
+
+  .brightness-val {
+    font-family: 'JetBrains Mono', monospace; font-size: 15px;
+    font-weight: 600; color: var(--text); min-width: 40px; text-align: right;
+  }
 
   /* ── Reboot ── */
   .reboot-card {
@@ -159,35 +198,29 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     color: var(--btn-color); font-family: 'Inter', sans-serif;
     font-size: 12px; font-weight: 700; letter-spacing: 1px;
     padding: 10px 20px; border-radius: 9px; cursor: pointer;
-    text-transform: uppercase;
+    text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
     transition: background 0.2s, border-color 0.2s, color 0.2s;
-    white-space: nowrap; flex-shrink: 0;
   }
   .btn-reboot:hover    { background: #dc2626; border-color: #dc2626; color: #fff; }
   .btn-reboot:active   { background: #b91c1c; }
   .btn-reboot:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* ── curl ── */
-  .curl-card { padding: 18px 24px; background: var(--curl-bg); border-color: var(--curl-border); }
-  .curl-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
-  .curl-line { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 2.2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .curl-cmd  { color: #7ab0ff; }
-  .curl-url  { color: #34d399; word-break: break-all; }
-  .curl-note { color: var(--text-faint); font-size: 11px; }
+  .curl-card   { padding: 18px 24px; background: var(--curl-bg); border-color: var(--curl-border); }
+  .curl-label  { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
+  .curl-line   { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 2.2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .curl-cmd    { color: #7ab0ff; }
+  .curl-url    { color: #34d399; word-break: break-all; }
+  .curl-note   { color: var(--text-faint); font-size: 11px; }
 
   /* ── Статус ── */
-  .status-bar {
-    display: flex; align-items: center; gap: 14px;
-    font-size: 11px; font-weight: 500;
-    color: var(--text-faint); letter-spacing: 1.5px; margin-top: 4px;
-  }
+  .status-bar  { display: flex; align-items: center; gap: 14px; font-size: 11px; font-weight: 500; color: var(--text-faint); letter-spacing: 1.5px; margin-top: 4px; }
   .ws-indicator { display: flex; align-items: center; gap: 5px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
   .ws-dot { width: 7px; height: 7px; border-radius: 50%; background: #6b7280; transition: background 0.3s; }
   .ws-dot.connected    { background: #16a34a; animation: pulse 2s infinite; }
   .ws-dot.disconnected { background: #dc2626; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 
-  /* toast */
   .toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
     background: var(--card); border: 1px solid var(--border);
@@ -213,7 +246,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <!-- Статистика -->
 <div class="card stats-card">
-
   <div class="stats-row">
     <div class="stat">
       <div class="stat-label">Temperature</div>
@@ -258,14 +290,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
 
   <div class="stat">
-    <div class="stat-label">Display Brightness</div>
-    <div class="stat-value">
-      <span id="brightness-pct">—</span><span class="unit">%</span>
-      <span style="font-size:12px;color:var(--text-faint);margin-left:8px" id="brightness-label"></span>
-    </div>
-  </div>
-
-  <div class="stat">
     <div class="stat-label">Requests Since Boot</div>
     <div class="stat-value">
       <div class="req-badge">
@@ -274,7 +298,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       </div>
     </div>
   </div>
+</div>
 
+<!-- Яркость -->
+<div class="card brightness-card">
+  <div class="brightness-header">
+    <div class="brightness-title">Display Brightness</div>
+    <div class="brightness-mode">
+      <button class="mode-btn" id="btn-auto"   onclick="setBrightnessAuto()">Auto</button>
+      <button class="mode-btn" id="btn-manual" onclick="enableManual()">Manual</button>
+    </div>
+  </div>
+  <div class="slider-row">
+    <span class="brightness-icon">🌑</span>
+    <input type="range" id="brightness-slider"
+           min="0" max="100" value="78"
+           oninput="onSliderInput(this.value)"
+           onchange="sendBrightness(this.value)">
+    <span class="brightness-icon">☀️</span>
+    <span class="brightness-val"><span id="brightness-pct">—</span>%</span>
+  </div>
 </div>
 
 <!-- Reboot -->
@@ -291,7 +334,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="curl-label">API · curl examples</div>
   <div class="curl-line"><span class="curl-cmd">curl</span><span class="curl-url" id="curl-time">http://&lt;IP&gt;/api/time</span></div>
   <div class="curl-line"><span class="curl-cmd">curl</span><span class="curl-url" id="curl-stats">http://&lt;IP&gt;/api/stats</span></div>
-  <div class="curl-line curl-note"># JSON: time, date, day, uptime, temp, rssi, ram, cpu, brightness, requests</div>
+  <div class="curl-line"><span class="curl-cmd">curl -X POST</span><span class="curl-url" id="curl-bright">http://&lt;IP&gt;/api/brightness -d "value=80"</span></div>
+  <div class="curl-line curl-note"># auto mode: curl -X POST http://&lt;IP&gt;/api/brightness -d "auto=1"</div>
 </div>
 
 <div class="status-bar">
@@ -306,59 +350,115 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <script>
   // ── Тема ─────────────────────────────────────────────
-  const savedTheme = localStorage.getItem('theme') || 'dark';
-  applyTheme(savedTheme);
+  applyTheme(localStorage.getItem('theme') || 'dark');
 
   function applyTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
     document.getElementById('theme-btn').textContent = t === 'dark' ? '🌙' : '☀️';
   }
   function toggleTheme() {
-    const cur  = document.documentElement.getAttribute('data-theme');
+    const cur = document.documentElement.getAttribute('data-theme');
     const next = cur === 'dark' ? 'light' : 'dark';
     applyTheme(next);
     localStorage.setItem('theme', next);
   }
 
-  // ── WebSocket ────────────────────────────────────────
+  // ── Яркость ──────────────────────────────────────────
+  let isManual = false;
+  let sliderBusy = false;
+
+  function onSliderInput(val) {
+    // Обновляем gradient слайдера в реальном времени
+    const slider = document.getElementById('brightness-slider');
+    slider.style.backgroundSize = val + '% 100%';
+    document.getElementById('brightness-pct').textContent = val;
+  }
+
+  function enableManual() {
+    isManual = true;
+    updateModeButtons(true);
+    document.getElementById('brightness-slider').disabled = false;
+  }
+
+  function setBrightnessAuto() {
+    isManual = false;
+    updateModeButtons(false);
+    document.getElementById('brightness-slider').disabled = true;
+    fetch('/api/brightness', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'auto=1'
+    }).then(() => showToast('Auto brightness enabled'));
+  }
+
+  function sendBrightness(val) {
+    if (!isManual) return;
+    fetch('/api/brightness', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'value=' + val
+    });
+  }
+
+  function updateModeButtons(manual) {
+    document.getElementById('btn-auto').classList.toggle('active', !manual);
+    document.getElementById('btn-manual').classList.toggle('active',  manual);
+  }
+
+  // ── WebSocket ─────────────────────────────────────────
   let ws, wsReconnectTimer;
 
   function wsConnect() {
     ws = new WebSocket(`ws://${location.hostname}:81/`);
-    ws.onopen  = () => { setWsStatus(true);  clearTimeout(wsReconnectTimer); };
+    ws.onopen    = () => { setWsStatus(true);  clearTimeout(wsReconnectTimer); };
     ws.onmessage = (e) => { try { updateUI(JSON.parse(e.data)); } catch(_) {} };
-    ws.onclose = () => { setWsStatus(false); wsReconnectTimer = setTimeout(wsConnect, 3000); };
-    ws.onerror = () => ws.close();
+    ws.onclose   = () => { setWsStatus(false); wsReconnectTimer = setTimeout(wsConnect, 3000); };
+    ws.onerror   = () => ws.close();
   }
 
   function setWsStatus(ok) {
-    document.getElementById('ws-dot').className   = 'ws-dot ' + (ok ? 'connected' : 'disconnected');
+    document.getElementById('ws-dot').className    = 'ws-dot ' + (ok ? 'connected' : 'disconnected');
     document.getElementById('ws-label').textContent = ok ? 'LIVE' : 'OFFLINE';
   }
 
-  // ── UI update ────────────────────────────────────────
+  // ── UI update ─────────────────────────────────────────
   function updateUI(d) {
-    document.getElementById('time').textContent            = d.time;
-    document.getElementById('date').textContent            = d.date;
-    document.getElementById('day').textContent             = d.day;
-    document.getElementById('uptime-label').textContent    = d.uptime;
-    document.getElementById('ssid').textContent            = d.ssid;
-    document.getElementById('ip').textContent              = d.ip;
-    document.getElementById('temp').textContent            = d.temp;
-    document.getElementById('rssi-val').textContent        = d.rssi;
-    document.getElementById('cpu-val').textContent         = d.cpu;
-    document.getElementById('brightness-pct').textContent  = d.brightness_pct;
-    document.getElementById('brightness-label').textContent = d.brightness_label;
-    document.getElementById('curl-time').textContent       = 'http://' + d.ip + '/api/time';
-    document.getElementById('curl-stats').textContent      = 'http://' + d.ip + '/api/stats';
-    document.getElementById('req-count').textContent       = d.requests.toLocaleString();
+    document.getElementById('time').textContent         = d.time;
+    document.getElementById('date').textContent         = d.date;
+    document.getElementById('day').textContent          = d.day;
+    document.getElementById('uptime-label').textContent = d.uptime;
+    document.getElementById('ssid').textContent         = d.ssid;
+    document.getElementById('ip').textContent           = d.ip;
+    document.getElementById('temp').textContent         = d.temp;
+    document.getElementById('rssi-val').textContent     = d.rssi;
+    document.getElementById('cpu-val').textContent      = d.cpu;
+    document.getElementById('req-count').textContent    = d.requests.toLocaleString();
+    document.getElementById('curl-time').textContent    = 'http://' + d.ip + '/api/time';
+    document.getElementById('curl-stats').textContent   = 'http://' + d.ip + '/api/stats';
+    document.getElementById('curl-bright').textContent  = 'http://' + d.ip + '/api/brightness -d "value=80"';
+
+    // Слайдер — обновляем только если пользователь не тянет его прямо сейчас
+    const slider = document.getElementById('brightness-slider');
+    if (!slider.matches(':active')) {
+      slider.value = d.brightness_pct;
+      slider.style.backgroundSize = d.brightness_pct + '% 100%';
+      document.getElementById('brightness-pct').textContent = d.brightness_pct;
+    }
+
+    // Режим авто/ручной
+    const manual = d.brightness_manual === true;
+    if (manual !== isManual) {
+      isManual = manual;
+      updateModeButtons(manual);
+      slider.disabled = !manual;
+    }
 
     // CPU bar
     const cpuEl = document.getElementById('cpu-bar');
     cpuEl.style.width = d.cpu + '%';
     cpuEl.className = 'cpu-mini-fill' + (d.cpu>80?' crit':d.cpu>50?' warn':'');
 
-    // WiFi dots
+    // WiFi
     const lvl = d.rssi>=-50?4:d.rssi>=-60?3:d.rssi>=-70?2:1;
     for(let i=1;i<=4;i++)
       document.getElementById('d'+i).className = i<=lvl?'on':'';
@@ -371,7 +471,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       (d.ram_total/1024).toFixed(1) + ' KB · ' + pct + '% used';
   }
 
-  // ── Reboot ───────────────────────────────────────────
+  // ── Reboot ────────────────────────────────────────────
   function showToast(msg, ms=2500) {
     const t = document.getElementById('toast');
     t.textContent = msg; t.classList.add('show');
