@@ -6,20 +6,16 @@ on:
   pull_request:
     branches: [ main, master ]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
 
-  # ── Нативные тесты ───────────────────────────────────────
   test:
     name: Native Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.platformio
@@ -33,16 +29,15 @@ jobs:
       - name: Run native tests
         run: pio test -e native --verbose
 
-  # ── Сборка прошивки ───────────────────────────────────────
   build:
     name: Build Firmware
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.platformio
@@ -57,7 +52,7 @@ jobs:
         run: pio run -e esp32-c3-super-mini
 
       - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: firmware-${{ github.sha }}
           path: |
@@ -65,12 +60,11 @@ jobs:
             .pio/build/esp32-c3-super-mini/firmware.elf
           retention-days: 30
 
-  # ── Lint ─────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install cppcheck
         run: sudo apt-get install -y cppcheck
