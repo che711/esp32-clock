@@ -6,9 +6,10 @@
 #include <U8g2lib.h>
 #include <SPI.h>
 #include "web_ui.h"
+#include "clock_utils.h"
 
 // ─── WiFi ────────────────────────────────────────────────
-const char* WIFI_SSID = "network";
+const char* WIFI_SSID = "SkyNet";
 const char* WIFI_PASS = "password";
 
 // ─── NTP ─────────────────────────────────────────────────
@@ -43,6 +44,9 @@ char dayFullBuf[12];
 bool timeSynced = false;
 String localIP  = "";
 
+// ─── Счётчик запросов ─────────────────────────────────────
+static uint32_t requestCount = 0;
+
 // ─── CPU ─────────────────────────────────────────────────
 static float cpuLoadPct = 0.0f;
 uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0, 99); }
@@ -55,40 +59,23 @@ void updateBrightness() {
     if (!timeSynced) return;
     struct tm t;
     if (!getLocalTime(&t)) return;
-    int h = t.tm_hour;
-
-    uint8_t    newC;
-    const char* newL;
-    if      (h >= 22 || h < 6) { newC = 15;  newL = "Night";   }
-    else if (h < 8)             { newC = 80;  newL = "Morning"; }
-    else if (h < 20)            { newC = 200; newL = "Day";     }
-    else                        { newC = 120; newL = "Evening"; }
-
-    if (newC != currentContrast) {
-        currentContrast = newC;
-        brightnessLabel = newL;
+    BrightnessLevel b = brightnessForHour(t.tm_hour);
+    if (b.contrast != currentContrast) {
+        currentContrast = b.contrast;
+        brightnessLabel = b.label;
         u8g2.setContrast(currentContrast);
         Serial.printf("Brightness → %s (%d)\n", brightnessLabel, currentContrast);
     }
 }
 
-uint8_t getBrightnessPct() {
-    return (uint8_t)(currentContrast * 100 / 200);
-}
-
 // ─── Uptime ───────────────────────────────────────────────
 String getUptime() {
-    uint32_t s = millis() / 1000;
-    uint32_t d = s / 86400; s %= 86400;
-    uint32_t h = s / 3600;  s %= 3600;
-    uint32_t m = s / 60;    s %= 60;
     char buf[32];
-    if (d > 0) snprintf(buf, sizeof(buf), "%dd %02dh %02dm %02ds", d, h, m, s);
-    else        snprintf(buf, sizeof(buf), "%02dh %02dm %02ds", h, m, s);
+    formatUptime(millis() / 1000, buf, sizeof(buf));
     return String(buf);
 }
 
-// ─── JSON builder (HTTP + WebSocket) ─────────────────────
+// ─── JSON builder ─────────────────────────────────────────
 void buildJson(char* buf, size_t sz) {
     snprintf(buf, sz,
         "{"
@@ -104,7 +91,8 @@ void buildJson(char* buf, size_t sz) {
         "\"ram_free\":%lu,"
         "\"ram_total\":%lu,"
         "\"brightness_pct\":%d,"
-        "\"brightness_label\":\"%s\""
+        "\"brightness_label\":\"%s\","
+        "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
         getUptime().c_str(),
@@ -114,21 +102,27 @@ void buildJson(char* buf, size_t sz) {
         getCpuLoad(),
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)ESP.getHeapSize(),
-        getBrightnessPct(),
-        brightnessLabel
+        (int)(currentContrast * 100 / 200),
+        brightnessLabel,
+        (unsigned long)requestCount
     );
 }
 
 // ─── HTTP ─────────────────────────────────────────────────
-void handleRoot() { server.send_P(200, "text/html", INDEX_HTML); }
+void handleRoot() {
+    requestCount++;
+    server.send_P(200, "text/html", INDEX_HTML);
+}
 
 void handleApiStats() {
+    requestCount++;
     char json[640];
     buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
 
 void handleApiTime() {
+    requestCount++;
     char json[256];
     snprintf(json, sizeof(json),
         "{\"time\":\"%s\",\"date\":\"%s\",\"day\":\"%s\","
@@ -139,17 +133,21 @@ void handleApiTime() {
 }
 
 void handleReboot() {
+    requestCount++;
     server.send(200, "text/plain", "Rebooting...");
     delay(300);
     ESP.restart();
 }
 
-void handleNotFound() { server.send(404, "text/plain", "Not found"); }
+void handleNotFound() {
+    requestCount++;
+    server.send(404, "text/plain", "Not found");
+}
 
 // ─── WebSocket ────────────────────────────────────────────
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
-        // Сразу отправляем свежие данные новому клиенту
+        requestCount++;
         char json[640];
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
@@ -273,7 +271,7 @@ void setup() {
     webSocket.begin();
     webSocket.onEvent(webSocketEvent);
 
-    Serial.printf("HTTP on :80, WebSocket on :81\n");
+    Serial.printf("HTTP :80  WS :81\n");
 }
 
 void loop() {
@@ -288,7 +286,6 @@ void loop() {
         drawOLED();
         strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
 
-        // Push всем WebSocket клиентам раз в секунду
         char json[640];
         buildJson(json, sizeof(json));
         webSocket.broadcastTXT(json);
