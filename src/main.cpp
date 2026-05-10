@@ -9,7 +9,7 @@
 #include "clock_utils.h"
 
 // ─── WiFi ────────────────────────────────────────────────
-const char* WIFI_SSID = "SkyNet";
+const char* WIFI_SSID = "network";
 const char* WIFI_PASS = "password";
 
 // ─── NTP ─────────────────────────────────────────────────

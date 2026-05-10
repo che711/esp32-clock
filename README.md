@@ -17,4 +17,3 @@ curl http://<ip_clock>//api/reboot
 
 ## Brightess:
 curl -X POST http://<ip_clock>/api/brightness -d "value=50" or "auto=1"
-
