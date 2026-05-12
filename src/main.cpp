@@ -8,30 +8,25 @@
 #include "web_ui.h"
 #include "clock_utils.h"
 
-// ─── WiFi ────────────────────────────────────────────────
 const char* WIFI_SSID = "SkyNet";
 const char* WIFI_PASS = "password";
 
-// ─── NTP ─────────────────────────────────────────────────
 const char* NTP_SERVER = "pool.ntp.org";
 const long  GMT_OFFSET = 3600;
 const int   DST_OFFSET = 3600;
 
-// ─── Пины ────────────────────────────────────────────────
 #define PIN_CLK  6
 #define PIN_DIN  7
 #define PIN_CS   10
 #define PIN_DC   1
 #define PIN_RST  3
 
-// ─── Дисплей ─────────────────────────────────────────────
 U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI
     u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
 
 WebServer        server(80);
 WebSocketsServer webSocket(81);
 
-// ─── Строки ──────────────────────────────────────────────
 const char* DAYS_SHORT[] = { "SUN","MON","TUE","WED","THU","FRI","SAT" };
 const char* DAYS_FULL[]  = { "Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday" };
 const char* MONTHS[]     = { "JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC" };
@@ -44,11 +39,10 @@ char dayFullBuf[12];
 bool timeSynced   = false;
 String localIP    = "";
 
-// ─── Состояние ───────────────────────────────────────────
-static uint32_t requestCount    = 0;
-static float    cpuLoadPct      = 0.0f;
-static bool     displayOn       = true;
-static uint8_t  currentContrast = 200;
+static uint32_t requestCount     = 0;
+static float    cpuLoadPct       = 0.0f;
+static bool     displayOn        = true;
+static uint8_t  currentContrast  = 200;
 static bool     manualBrightness = false;
 const char*     brightnessLabel  = "Day";
 
@@ -61,9 +55,9 @@ void setDisplayPower(bool on) {
         u8g2.setPowerSave(0);
         u8g2.setContrast(currentContrast);
     } else {
-        u8g2.setPowerSave(1); // OLED переходит в режим сна
+        u8g2.setPowerSave(1);
     }
-    Serial.printf("Display power → %s\n", on ? "ON" : "OFF");
+    Serial.printf("Display → %s\n", on ? "ON" : "OFF");
 }
 
 // ─── Яркость ─────────────────────────────────────────────
@@ -91,7 +85,7 @@ String getUptime() {
     return String(buf);
 }
 
-// ─── JSON builder ─────────────────────────────────────────
+// ─── JSON ─────────────────────────────────────────────────
 void buildJson(char* buf, size_t sz) {
     snprintf(buf, sz,
         "{"
@@ -160,15 +154,12 @@ void handleApiTime() {
 
 void handleApiBrightness() {
     requestCount++;
-
     if (server.hasArg("auto")) {
         manualBrightness = false;
         server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
-        Serial.println("Brightness → auto");
         broadcastState();
         return;
     }
-
     if (server.hasArg("value")) {
         int pct = constrain(server.arg("value").toInt(), 0, 100);
         manualBrightness = true;
@@ -177,11 +168,9 @@ void handleApiBrightness() {
         snprintf(resp, sizeof(resp),
                  "{\"ok\":true,\"mode\":\"manual\",\"pct\":%d}", pct);
         server.send(200, "application/json", resp);
-        Serial.printf("Brightness → manual %d%%\n", pct);
         broadcastState();
         return;
     }
-
     server.send(400, "application/json", "{\"error\":\"missing value or auto\"}");
 }
 
@@ -274,7 +263,6 @@ void updateTimeStrings() {
 // ─── Дисплей ─────────────────────────────────────────────
 void drawOLED() {
     if (!displayOn) return;
-
     u8g2.clearBuffer();
 
     char hh[3] = { timeBuf[0], timeBuf[1], 0 };
@@ -312,7 +300,6 @@ void drawOLED() {
     } else {
         u8g2.drawStr(2, 63, "NO NTP");
     }
-
     u8g2.sendBuffer();
 }
 
@@ -331,12 +318,12 @@ void setup() {
     connectWifi();
     syncNTP();
 
-    server.on("/",                HTTP_GET,  handleRoot);
-    server.on("/api/stats",       HTTP_GET,  handleApiStats);
-    server.on("/api/time",        HTTP_GET,  handleApiTime);
-    server.on("/api/brightness",  HTTP_POST, handleApiBrightness);
-    server.on("/api/power",       HTTP_POST, handleApiPower);
-    server.on("/api/reboot",      HTTP_POST, handleReboot);
+    server.on("/",               HTTP_GET,  handleRoot);
+    server.on("/api/stats",      HTTP_GET,  handleApiStats);
+    server.on("/api/time",       HTTP_GET,  handleApiTime);
+    server.on("/api/brightness", HTTP_POST, handleApiBrightness);
+    server.on("/api/power",      HTTP_POST, handleApiPower);
+    server.on("/api/reboot",     HTTP_POST, handleReboot);
     server.onNotFound(handleNotFound);
     server.begin();
 
