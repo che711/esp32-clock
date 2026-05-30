@@ -178,10 +178,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   /* ── curl ── */
   .curl-card  { padding: 18px 24px; background: var(--curl-bg); border-color: var(--curl-border); }
   .curl-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
-  .curl-line  { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 2.2; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .curl-cmd   { color: #7ab0ff; }
-  .curl-url   { color: #34d399; word-break: break-all; }
-  .curl-note  { color: var(--text-faint); font-size: 11px; }
+  .curl-line  { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #79c0ff; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: all; }
+  .curl-note  { color: var(--text-faint); font-size: 11px; display: block; margin-top: 4px; }
 
   /* ── Статус ── */
   .status-bar   { display: flex; align-items: center; gap: 14px; font-size: 11px; font-weight: 500; color: var(--text-faint); letter-spacing: 1.5px; margin-top: 4px; }
@@ -200,6 +198,35 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     pointer-events: none; white-space: nowrap; z-index: 100;
   }
   .toast.show { opacity: 1; }
+
+  /* ── curl copy buttons ── */
+  .curl-row { display: flex; align-items: center; gap: 10px; }
+  .curl-row .curl-line { flex: 1; margin: 0; }
+  .curl-copy {
+    flex-shrink: 0; padding: 3px 10px; border-radius: 5px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+    border: 1px solid var(--curl-border); background: transparent;
+    color: var(--text-faint); cursor: pointer; text-transform: uppercase;
+    font-family: 'Inter', sans-serif;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .curl-copy:hover { border-color: var(--accent); color: var(--accent); }
+  .curl-copy.copied { border-color: #16a34a; color: #16a34a; }
+
+  /* ── RAM bar ── */
+  .ram-row { display: flex; flex-direction: column; gap: 5px; }
+  .ram-bar-wrap { height: 4px; background: var(--slider-bg); border-radius: 2px; overflow: hidden; max-width: 200px; }
+  .ram-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 1s ease; }
+  .ram-bar-fill.warn { background: #d97706; }
+  .ram-bar-fill.crit { background: #dc2626; }
+
+  /* ── Chip info card ── */
+  .chip-card { padding: 18px 24px; }
+  .chip-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; }
+  .chip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
+  .chip-item { display: flex; flex-direction: column; gap: 2px; }
+  .chip-key  { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; }
+  .chip-val  { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text); }
 </style>
 </head>
 <body>
@@ -253,7 +280,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
   <div class="stat">
     <div class="stat-label">RAM</div>
-    <div class="stat-value" id="ram-txt">—</div>
+    <div class="ram-row">
+      <div class="stat-value" id="ram-txt">—</div>
+      <div class="ram-bar-wrap"><div class="ram-bar-fill" id="ram-bar" style="width:0%"></div></div>
+    </div>
   </div>
   <div class="stat">
     <div class="stat-label">Requests Since Boot</div>
@@ -299,15 +329,65 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!-- curl -->
 <div class="card curl-card">
   <div class="curl-label">API · curl examples</div>
-  <div class="curl-line"><span class="curl-cmd">curl</span><span class="curl-url" id="curl-time">http://&lt;IP&gt;/api/time</span></div>
-  <div class="curl-line"><span class="curl-cmd">curl</span><span class="curl-url" id="curl-stats">http://&lt;IP&gt;/api/stats</span></div>
-  <div class="curl-line"><span class="curl-cmd">curl -X POST</span><span class="curl-url" id="curl-bright">http://&lt;IP&gt;/api/brightness -d "value=80"</span></div>
-  <div class="curl-line"><span class="curl-cmd">curl -X POST</span><span class="curl-url" id="curl-power">http://&lt;IP&gt;/api/power -d "on=0"</span></div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-time">curl http://&lt;IP&gt;/api/time</code>
+    <button class="curl-copy" onclick="copyCmd('curl-time',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-stats">curl http://&lt;IP&gt;/api/stats</code>
+    <button class="curl-copy" onclick="copyCmd('curl-stats',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-bright">curl -X POST http://&lt;IP&gt;/api/brightness -d "value=80"</code>
+    <button class="curl-copy" onclick="copyCmd('curl-bright',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-power">curl -X POST http://&lt;IP&gt;/api/power -d "on=0"</code>
+    <button class="curl-copy" onclick="copyCmd('curl-power',this)">copy</button>
+  </div>
   <div class="curl-line curl-note"># brightness auto: -d "auto=1" &nbsp;|&nbsp; power on: -d "on=1"</div>
 </div>
 
+<!-- Chip info -->
+<div class="card chip-card">
+  <div class="chip-label">Microcontroller · ESP32-C3 Super Mini</div>
+  <div class="chip-grid">
+    <div class="chip-item">
+      <span class="chip-key">Architecture</span>
+      <span class="chip-val">RISC-V 32-bit</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">Core / Freq</span>
+      <span class="chip-val">1× up to 160 MHz</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">Flash</span>
+      <span class="chip-val">4 MB</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">SRAM</span>
+      <span class="chip-val">400 KB</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">WiFi</span>
+      <span class="chip-val">802.11 b/g/n 2.4 GHz</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">Bluetooth</span>
+      <span class="chip-val">BLE 5.0</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">Display</span>
+      <span class="chip-val">SSD1322 256×64 SPI</span>
+    </div>
+    <div class="chip-item">
+      <span class="chip-key">Protocol</span>
+      <span class="chip-val">REST + WebSocket :81</span>
+    </div>
+  </div>
+</div>
+
 <div class="status-bar">
-  <span>ESP32-C3 SUPER MINI</span>
   <span class="ws-indicator">
     <span class="ws-dot" id="ws-dot"></span>
     <span id="ws-label">CONNECTING</span>
@@ -446,10 +526,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('rssi-val').textContent     = d.rssi;
     document.getElementById('cpu-val').textContent      = d.cpu;
     document.getElementById('req-count').textContent    = d.requests.toLocaleString();
-    document.getElementById('curl-time').textContent    = 'http://' + d.ip + '/api/time';
-    document.getElementById('curl-stats').textContent   = 'http://' + d.ip + '/api/stats';
-    document.getElementById('curl-bright').textContent  = 'http://' + d.ip + '/api/brightness -d "value=80"';
-    document.getElementById('curl-power').textContent   = 'http://' + d.ip + '/api/power -d "on=0"';
+    document.getElementById('curl-time')  .textContent = 'curl http://' + d.ip + '/api/time';
+    document.getElementById('curl-stats') .textContent = 'curl http://' + d.ip + '/api/stats';
+    document.getElementById('curl-bright').textContent = 'curl -X POST http://' + d.ip + '/api/brightness -d "value=80"';
+    document.getElementById('curl-power') .textContent = 'curl -X POST http://' + d.ip + '/api/power -d "on=0"';
 
     // Слайдер — не трогаем пока пользователь его двигает или есть pending-запрос
     if (!isDragging && !modeChangePending && !isManual) {
@@ -488,8 +568,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const used = d.ram_total - d.ram_free;
     const pct  = Math.round(used * 100 / d.ram_total);
     document.getElementById('ram-txt').textContent =
-      (d.ram_free / 1024).toFixed(1) + ' KB free / ' +
-      (d.ram_total / 1024).toFixed(1) + ' KB · ' + pct + '% used';
+      Math.round(d.ram_free / 1024) + ' KB free  ·  ' +
+      Math.round(d.ram_total / 1024) + ' KB total  ·  ' + pct + '% used';
+    const ramBar = document.getElementById('ram-bar');
+    ramBar.style.width = pct + '%';
+    ramBar.className = 'ram-bar-fill' + (pct > 80 ? ' crit' : pct > 60 ? ' warn' : '');
   }
 
   // ── Reboot ────────────────────────────────────────────
@@ -515,6 +598,34 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
 
   wsConnect();
+
+  // ── Copy curl ─────────────────────────────────────────
+  function copyCmd(id, btn) {
+    const text = document.getElementById(id).textContent.trim();
+
+    function done() {
+      btn.textContent = '✓ copied';
+      btn.classList.add('copied');
+      setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1800);
+    }
+
+    function fallback() {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      try { if (document.execCommand('copy')) done(); } catch(e) {}
+      document.body.removeChild(ta);
+    }
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
+  }
 </script>
 </body>
 </html>
