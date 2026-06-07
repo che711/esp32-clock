@@ -220,6 +220,44 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .ram-bar-fill.warn { background: #d97706; }
   .ram-bar-fill.crit { background: #dc2626; }
 
+  /* ── Секундомер ── */
+  .stopwatch-card { padding: 22px 24px; }
+  .stopwatch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .stopwatch-title { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
+  .sw-display {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(32px, 7vw, 56px); font-weight: 700;
+    letter-spacing: 2px; text-align: center; color: var(--text);
+    line-height: 1; margin-bottom: 16px;
+  }
+  .sw-display .sw-ms { font-size: 0.45em; color: var(--text-dim); vertical-align: baseline; }
+  .sw-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .sw-btn {
+    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 700;
+    letter-spacing: 1px; padding: 10px 22px; border-radius: 9px;
+    cursor: pointer; text-transform: uppercase; white-space: nowrap;
+    border: 1px solid var(--border); background: var(--btn-bg); color: var(--btn-color);
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+    min-width: 90px;
+  }
+  #sw-start-btn { border-color: #16a34a; color: #16a34a; }
+  #sw-start-btn:hover { background: #16a34a; color: #fff; }
+  #sw-start-btn.running { border-color: #d97706; color: #d97706; }
+  #sw-start-btn.running:hover { background: #d97706; color: #fff; }
+  #sw-reset-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #sw-lap-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .sw-laps { margin-top: 14px; max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .sw-lap-item {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    padding: 5px 10px; border-radius: 6px;
+    background: var(--curl-bg); border: 1px solid var(--curl-border);
+  }
+  .sw-lap-num { color: var(--text-faint); font-size: 11px; }
+  .sw-lap-time { color: var(--text); }
+  .sw-lap-delta { color: var(--text-dim); font-size: 11px; }
+  .sw-laps:empty { display: none; }
+
   /* ── Chip info card ── */
   .chip-card { padding: 18px 24px; }
   .chip-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; }
@@ -324,6 +362,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display On</button>
     <button class="btn-action btn-reboot"   id="btn-reboot" onclick="doReboot()">Reboot</button>
   </div>
+</div>
+
+<!-- Секундомер -->
+<div class="card stopwatch-card">
+  <div class="stopwatch-header">
+    <div class="stopwatch-title">Stopwatch</div>
+  </div>
+  <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
+  <div class="sw-controls">
+    <button class="sw-btn" id="sw-start-btn" onclick="swToggle()">Start</button>
+    <button class="sw-btn" id="sw-lap-btn"   onclick="swLap()"    disabled>Lap</button>
+    <button class="sw-btn" id="sw-reset-btn" onclick="swReset()">Reset</button>
+  </div>
+  <div class="sw-laps" id="sw-laps"></div>
 </div>
 
 <!-- curl -->
@@ -595,6 +647,87 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       btn.disabled = false;
       btn.textContent = 'Reboot';
     }, 7000);
+  }
+
+  // ── Секундомер ───────────────────────────────────────
+  let swRunning    = false;
+  let swStartTs    = 0;      // performance.now() момент старта текущего "отрезка"
+  let swAccum      = 0;      // накопленное время в мс (предыдущие отрезки)
+  let swRafId      = null;
+  let swLaps       = [];     // массив { total, delta } в мс
+  let swLastLapMs  = 0;
+
+  function swToggle() {
+    if (!swRunning) {
+      swRunning = true;
+      swStartTs = performance.now();
+      document.getElementById('sw-start-btn').textContent = 'Pause';
+      document.getElementById('sw-start-btn').classList.add('running');
+      document.getElementById('sw-lap-btn').disabled = false;
+      swTick();
+    } else {
+      swRunning = false;
+      swAccum  += performance.now() - swStartTs;
+      cancelAnimationFrame(swRafId);
+      document.getElementById('sw-start-btn').textContent = 'Resume';
+      document.getElementById('sw-start-btn').classList.remove('running');
+    }
+  }
+
+  function swTick() {
+    const now    = swAccum + (performance.now() - swStartTs);
+    swRender(now);
+    if (swRunning) swRafId = requestAnimationFrame(swTick);
+  }
+
+  function swRender(ms) {
+    const totalMs = Math.floor(ms);
+    const mins    = Math.floor(totalMs / 60000);
+    const secs    = Math.floor((totalMs % 60000) / 1000);
+    const millis  = totalMs % 1000;
+    const mm = String(mins).padStart(2, '0');
+    const ss = String(secs).padStart(2, '0');
+    const ms3 = String(millis).padStart(3, '0');
+    document.getElementById('sw-display').innerHTML =
+      mm + ':' + ss + '<span class="sw-ms">.' + ms3 + '</span>';
+  }
+
+  function swLap() {
+    const now   = swAccum + (swRunning ? (performance.now() - swStartTs) : 0);
+    const delta = now - swLastLapMs;
+    swLastLapMs = now;
+    swLaps.push({ total: now, delta: delta });
+    const container = document.getElementById('sw-laps');
+    const n   = swLaps.length;
+    const row = document.createElement('div');
+    row.className = 'sw-lap-item';
+    row.innerHTML =
+      '<span class="sw-lap-num">Lap ' + n + '</span>' +
+      '<span class="sw-lap-time">' + swFmt(now) + '</span>' +
+      '<span class="sw-lap-delta">+' + swFmt(delta) + '</span>';
+    container.prepend(row);
+  }
+
+  function swReset() {
+    swRunning   = false;
+    swAccum     = 0;
+    swStartTs   = 0;
+    swLastLapMs = 0;
+    swLaps      = [];
+    cancelAnimationFrame(swRafId);
+    swRender(0);
+    document.getElementById('sw-start-btn').textContent = 'Start';
+    document.getElementById('sw-start-btn').classList.remove('running');
+    document.getElementById('sw-lap-btn').disabled = true;
+    document.getElementById('sw-laps').innerHTML = '';
+  }
+
+  function swFmt(ms) {
+    ms = Math.floor(ms);
+    const mi = Math.floor(ms / 60000);
+    const sc = Math.floor((ms % 60000) / 1000);
+    const ml = ms % 1000;
+    return String(mi).padStart(2,'0') + ':' + String(sc).padStart(2,'0') + '.' + String(ml).padStart(3,'0');
   }
 
   wsConnect();
