@@ -651,16 +651,21 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   // ── Секундомер ───────────────────────────────────────
   let swRunning    = false;
-  let swStartTs    = 0;      // performance.now() момент старта текущего "отрезка"
-  let swAccum      = 0;      // накопленное время в мс (предыдущие отрезки)
+  let swStartTs    = 0;
+  let swAccum      = 0;
   let swRafId      = null;
-  let swLaps       = [];     // массив { total, delta } в мс
+  let swLaps       = [];
   let swLastLapMs  = 0;
+
+  function swSend(cmd) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
+  }
 
   function swToggle() {
     if (!swRunning) {
       swRunning = true;
       swStartTs = performance.now();
+      swSend('sw:start');
       document.getElementById('sw-start-btn').textContent = 'Pause';
       document.getElementById('sw-start-btn').classList.add('running');
       document.getElementById('sw-lap-btn').disabled = false;
@@ -669,6 +674,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       swRunning = false;
       swAccum  += performance.now() - swStartTs;
       cancelAnimationFrame(swRafId);
+      swSend('sw:pause');
       document.getElementById('sw-start-btn').textContent = 'Resume';
       document.getElementById('sw-start-btn').classList.remove('running');
     }
@@ -716,6 +722,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     swLaps      = [];
     cancelAnimationFrame(swRafId);
     swRender(0);
+    swSend('sw:reset');
     document.getElementById('sw-start-btn').textContent = 'Start';
     document.getElementById('sw-start-btn').classList.remove('running');
     document.getElementById('sw-lap-btn').disabled = true;
