@@ -8,8 +8,8 @@
 #include "web_ui.h"
 #include "clock_utils.h"
 
-const char* WIFI_SSID = "SkyNet";
-const char* WIFI_PASS = "password";
+const char* WIFI_SSID = "your_network_name";
+const char* WIFI_PASS = "your_network_password";
 
 const char* NTP_SERVER = "pool.ntp.org";
 const long  GMT_OFFSET = 3600;
@@ -225,27 +225,26 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
     } else if (type == WStype_TEXT) {
+        Serial.printf("WS #%d TEXT: %.*s\n", num, (int)length, (char*)payload);
         // Команды секундомера: "sw:start" / "sw:pause" / "sw:reset"
-        String cmd = String((char*)payload).substring(0, length);
-        cmd.trim();
-        if (cmd == "sw:start") {
+        if (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) {
             if (swState != SW_RUNNING) {
                 swStartMs = millis();
                 swState   = SW_RUNNING;
                 Serial.println("Stopwatch START");
             }
-        } else if (cmd == "sw:pause") {
+        } else if (length >= 8 && strncmp((char*)payload, "sw:pause", 8) == 0) {
             if (swState == SW_RUNNING) {
                 swAccumMs += millis() - swStartMs;
                 swState    = SW_PAUSED;
                 Serial.println("Stopwatch PAUSE");
             }
-        } else if (cmd == "sw:reset") {
-            swState   = SW_IDLE;
-            swAccumMs = 0;
-            swStartMs = 0;
+        } else if (length >= 8 && strncmp((char*)payload, "sw:reset", 8) == 0) {
+            swState        = SW_IDLE;
+            swAccumMs      = 0;
+            swStartMs      = 0;
+            prevTimeBuf[0] = '\0';
             Serial.println("Stopwatch RESET");
-            drawOLED();  // сразу вернуть часы на экран
         }
     }
 }
@@ -335,8 +334,8 @@ void drawOLED() {
         // Статус внизу
         u8g2.setFont(u8g2_font_5x7_tr);
         const char* statusStr = (swState == SW_RUNNING) ? "STOPWATCH  RUNNING" : "STOPWATCH  PAUSED";
-        int sw = u8g2.getStrWidth(statusStr);
-        u8g2.drawStr((256 - sw) / 2, 63, statusStr);
+        int statusW = u8g2.getStrWidth(statusStr);
+        u8g2.drawStr((256 - statusW) / 2, 63, statusStr);
 
     } else {
         // ── Обычный режим часов ────────────────────────
@@ -418,14 +417,20 @@ void loop() {
     updateTimeStrings();
 
     if (swState == SW_RUNNING) {
-        // Секундомер активен — перерисовываем каждые ~100 мс
+        // Секундомер активен — перерисовываем дисплей каждые ~100 мс
         drawOLED();
-    } else if (strcmp(timeBuf, prevTimeBuf) != 0) {
-        // Обычный режим — раз в секунду
-        updateBrightness();
-        drawOLED();
-        strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
-        broadcastState();
+        // Часы в браузере продолжают идти: broadcastState раз в секунду
+        if (strcmp(timeBuf, prevTimeBuf) != 0) {
+            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+            broadcastState();
+        }
+    } else {
+        if (strcmp(timeBuf, prevTimeBuf) != 0) {
+            updateBrightness();
+            drawOLED();
+            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+            broadcastState();
+        }
     }
 
     uint32_t workUs = micros() - t0;
