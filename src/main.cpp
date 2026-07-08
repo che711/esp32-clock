@@ -2,18 +2,26 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
+#include <ESPmDNS.h>
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
 #include "web_ui.h"
 #include "clock_utils.h"
 
-const char* WIFI_SSID = "your_network_name";
-const char* WIFI_PASS = "your_network_password";
+const char* WIFI_SSID = "network";
+const char* WIFI_PASS = "password";
 
+const char* HOSTNAME   = "clock";           // → http://clock.local
 const char* NTP_SERVER = "pool.ntp.org";
-const long  GMT_OFFSET = 3600;
-const int   DST_OFFSET = 3600;
+
+// Часовой пояс задаётся POSIX-строкой TZ, а НЕ фиксированным сдвигом.
+// Так переход на летнее/зимнее время происходит автоматически.
+// Ниже — Варшава/Центральная Европа. Примеры для других зон:
+//   Лондон:   "GMT0BST,M3.5.0/1,M10.5.0"
+//   Киев:     "EET-2EEST,M3.5.0/3,M10.5.0/4"
+//   UTC:      "UTC0"
+const char* TZ_INFO = "CET-1CEST,M3.5.0,M10.5.0/3";
 
 #define PIN_CLK  6
 #define PIN_DIN  7
@@ -42,7 +50,7 @@ String localIP    = "";
 static uint32_t requestCount     = 0;
 static float    cpuLoadPct       = 0.0f;
 static bool     displayOn        = true;
-static uint8_t  currentContrast  = 200;
+static uint8_t  currentContrast  = 255;
 static bool     manualBrightness = false;
 const char*     brightnessLabel  = "Day";
 
@@ -58,7 +66,7 @@ uint32_t swElapsed() {
     return swAccumMs;
 }
 
-uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0, 99); }
+uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0.0f, 99.0f); }
 
 // ─── Дисплей вкл/выкл ────────────────────────────────────
 void setDisplayPower(bool on) {
@@ -69,7 +77,7 @@ void setDisplayPower(bool on) {
     } else {
         u8g2.setPowerSave(1);
     }
-    Serial.printf("Display → %s\n", on ? "ON" : "OFF");
+    Serial.printf("Display -> %s\n", on ? "ON" : "OFF");
 }
 
 // ─── Яркость ─────────────────────────────────────────────
@@ -82,11 +90,11 @@ void applyContrast(uint8_t val, const char* label) {
 void updateBrightness() {
     if (manualBrightness || !timeSynced) return;
     struct tm t;
-    if (!getLocalTime(&t)) return;
+    if (!getLocalTime(&t, 0)) return;
     BrightnessLevel b = brightnessForHour(t.tm_hour);
     if (b.contrast != currentContrast) {
         applyContrast(b.contrast, b.label);
-        Serial.printf("Auto brightness → %s (%d)\n", brightnessLabel, currentContrast);
+        Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentContrast);
     }
 }
 
@@ -116,6 +124,8 @@ void buildJson(char* buf, size_t sz) {
         "\"brightness_label\":\"%s\","
         "\"brightness_manual\":%s,"
         "\"display_on\":%s,"
+        "\"sw_state\":%d,"
+        "\"sw_ms\":%lu,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -126,16 +136,18 @@ void buildJson(char* buf, size_t sz) {
         getCpuLoad(),
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)ESP.getHeapSize(),
-        (int)(currentContrast * 100 / 255),
+        brightnessPct(currentContrast),
         brightnessLabel,
         manualBrightness ? "true" : "false",
         displayOn        ? "true" : "false",
+        (int)swState,
+        (unsigned long)swElapsed(),
         (unsigned long)requestCount
     );
 }
 
 void broadcastState() {
-    char json[720];
+    char json[768];
     buildJson(json, sizeof(json));
     webSocket.broadcastTXT(json);
 }
@@ -148,7 +160,7 @@ void handleRoot() {
 
 void handleApiStats() {
     requestCount++;
-    char json[720];
+    char json[768];
     buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
@@ -169,13 +181,14 @@ void handleApiBrightness() {
     if (server.hasArg("auto")) {
         manualBrightness = false;
         server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
+        updateBrightness();          // сразу применяем авто-уровень
         broadcastState();
         return;
     }
     if (server.hasArg("value")) {
         int pct = constrain(server.arg("value").toInt(), 0, 100);
         manualBrightness = true;
-        applyContrast((uint8_t)(pct * 255 / 100), "Manual");
+        applyContrast(pctToContrast(pct), "Manual");
         char resp[64];
         snprintf(resp, sizeof(resp),
                  "{\"ok\":true,\"mode\":\"manual\",\"pct\":%d}", pct);
@@ -216,36 +229,44 @@ void handleNotFound() {
 // ─── Forward declarations ─────────────────────────────────
 void drawOLED();
 
+// ─── Секундомер: приём команд ─────────────────────────────
+void swStart() {
+    if (swState != SW_RUNNING) {
+        swStartMs = millis();
+        swState   = SW_RUNNING;
+        Serial.println("Stopwatch START");
+    }
+}
+void swPause() {
+    if (swState == SW_RUNNING) {
+        swAccumMs += millis() - swStartMs;
+        swState    = SW_PAUSED;
+        Serial.println("Stopwatch PAUSE");
+    }
+}
+void swReset() {
+    swState        = SW_IDLE;
+    swAccumMs      = 0;
+    swStartMs      = 0;
+    prevTimeBuf[0] = '\0';          // заставляем перерисовать часы
+    Serial.println("Stopwatch RESET");
+}
+
 // ─── WebSocket ────────────────────────────────────────────
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
         requestCount++;
-        char json[720];
+        char json[768];
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
     } else if (type == WStype_TEXT) {
         Serial.printf("WS #%d TEXT: %.*s\n", num, (int)length, (char*)payload);
         // Команды секундомера: "sw:start" / "sw:pause" / "sw:reset"
-        if (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) {
-            if (swState != SW_RUNNING) {
-                swStartMs = millis();
-                swState   = SW_RUNNING;
-                Serial.println("Stopwatch START");
-            }
-        } else if (length >= 8 && strncmp((char*)payload, "sw:pause", 8) == 0) {
-            if (swState == SW_RUNNING) {
-                swAccumMs += millis() - swStartMs;
-                swState    = SW_PAUSED;
-                Serial.println("Stopwatch PAUSE");
-            }
-        } else if (length >= 8 && strncmp((char*)payload, "sw:reset", 8) == 0) {
-            swState        = SW_IDLE;
-            swAccumMs      = 0;
-            swStartMs      = 0;
-            prevTimeBuf[0] = '\0';
-            Serial.println("Stopwatch RESET");
-        }
+        if      (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) swStart();
+        else if (length >= 8 && strncmp((char*)payload, "sw:pause", 8) == 0) swPause();
+        else if (length >= 8 && strncmp((char*)payload, "sw:reset", 8) == 0) swReset();
+        broadcastState();           // мгновенно рассылаем новое состояние
     }
 }
 
@@ -253,6 +274,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
 void connectWifi() {
     Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
+    WiFi.setHostname(HOSTNAME);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     uint8_t tries = 0;
     while (WiFi.status() != WL_CONNECTED && tries < 30) {
@@ -261,6 +283,10 @@ void connectWifi() {
     if (WiFi.status() == WL_CONNECTED) {
         localIP = WiFi.localIP().toString();
         Serial.printf("\nIP: %s\n", localIP.c_str());
+        if (MDNS.begin(HOSTNAME)) {
+            MDNS.addService("http", "tcp", 80);
+            Serial.printf("mDNS: http://%s.local\n", HOSTNAME);
+        }
     } else {
         Serial.println("\nWiFi FAILED");
     }
@@ -268,12 +294,14 @@ void connectWifi() {
 
 void syncNTP() {
     if (WiFi.status() != WL_CONNECTED) return;
-    configTime(GMT_OFFSET, DST_OFFSET, NTP_SERVER);
+    // configTzTime сразу задаёт TZ-правило (DST считается автоматически).
+    configTzTime(TZ_INFO, NTP_SERVER);
     Serial.print("NTP sync");
     struct tm t;
     uint8_t tries = 0;
-    while (!getLocalTime(&t) && tries < 20) {
-        delay(500); Serial.print("."); tries++;
+    // getLocalTime с малым таймаутом на итерацию, чтобы не блокировать по 5 с.
+    while (!getLocalTime(&t, 500) && tries < 20) {
+        Serial.print("."); tries++;
     }
     timeSynced = (tries < 20);
     Serial.println(timeSynced ? " OK" : " TIMEOUT");
@@ -282,7 +310,7 @@ void syncNTP() {
 // ─── Буферы времени ───────────────────────────────────────
 void updateTimeStrings() {
     struct tm t;
-    if (getLocalTime(&t)) {
+    if (getLocalTime(&t, 0)) {
         snprintf(timeBuf,     sizeof(timeBuf),
                  "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
         snprintf(dateBuf,     sizeof(dateBuf),
@@ -304,17 +332,13 @@ void drawOLED() {
 
     if (swState != SW_IDLE) {
         // ── Режим секундомера ──────────────────────────
-        uint32_t ms    = swElapsed();
-        uint8_t  mins  = (ms / 60000) % 100;
-        uint8_t  secs  = (ms / 1000)  % 60;
-        uint16_t millis_part = ms % 1000;
+        char full[16];
+        formatStopwatch(swElapsed(), full, sizeof(full));  // "MM:SS.mmm"
+        // делим на "MM:SS" (крупно) и ".mmm" (мельче)
+        char mmss[6];  char msStr[5];
+        memcpy(mmss, full, 5);   mmss[5] = '\0';
+        snprintf(msStr, sizeof(msStr), "%s", full + 5);    // ".mmm" -> ровно 5 байт
 
-        char mmss[6];
-        snprintf(mmss, sizeof(mmss), "%02d:%02d", mins, secs);
-        char msStr[4];
-        snprintf(msStr, sizeof(msStr), ".%03d", millis_part);
-
-        // Большие MM:SS
         u8g2.setFont(u8g2_font_logisoso46_tr);
         int mainW = u8g2.getStrWidth(mmss);
         u8g2.setFont(u8g2_font_logisoso24_tr);
@@ -382,10 +406,12 @@ void drawOLED() {
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    delay(300);
+    delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
+
+    Serial.println("\n=== ESP32-C3 Clock boot ===");
 
     u8g2.begin();
-    u8g2.setContrast(200);
+    u8g2.setContrast(currentContrast);
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x10_tr);
     u8g2.drawStr(50, 35, "Connecting WiFi...");
@@ -419,23 +445,39 @@ void loop() {
     if (swState == SW_RUNNING) {
         // Секундомер активен — перерисовываем дисплей каждые ~100 мс
         drawOLED();
-        // Часы в браузере продолжают идти: broadcastState раз в секунду
+        // Часы/аптайм в браузере: broadcastState раз в секунду
         if (strcmp(timeBuf, prevTimeBuf) != 0) {
-            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf) - 1);
+            prevTimeBuf[sizeof(prevTimeBuf) - 1] = '\0';
+            updateBrightness();
             broadcastState();
         }
     } else {
         if (strcmp(timeBuf, prevTimeBuf) != 0) {
             updateBrightness();
             drawOLED();
-            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf) - 1);
+            prevTimeBuf[sizeof(prevTimeBuf) - 1] = '\0';
             broadcastState();
         }
     }
 
+    // Пульс в Serial раз в 5 с — монитор покажет жизнь, когда бы его ни открыли
+    static uint32_t lastHb = 0;
+    if (millis() - lastHb >= 5000) {
+        lastHb = millis();
+        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u\n",
+                      (unsigned long)(millis() / 1000),
+                      WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
+                      localIP.length() ? localIP.c_str() : "-",
+                      (int)WiFi.RSSI(),
+                      (unsigned)esp_get_free_heap_size());
+    }
+
+    // Оценка загрузки: доля времени работы в цикле ~100 мс (сглаживание EMA)
     uint32_t workUs = micros() - t0;
-    float sample = (float)workUs / 1000.0f;
-    cpuLoadPct = cpuLoadPct * 0.88f + (sample / 100.0f * 100.0f) * 0.12f;
+    float sample = (float)workUs / 1000.0f;   // мс работы в цикле == ~% при цикле 100 мс
+    cpuLoadPct = cpuLoadPct * 0.88f + sample * 0.12f;
 
     delay(100);
 }
