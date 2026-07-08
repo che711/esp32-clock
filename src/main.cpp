@@ -8,8 +8,8 @@
 #include "web_ui.h"
 #include "clock_utils.h"
 
-const char* WIFI_SSID = "network";
-const char* WIFI_PASS = "password";
+const char* WIFI_SSID = "your_network_name";
+const char* WIFI_PASS = "your_network_password";
 
 const char* NTP_SERVER = "pool.ntp.org";
 const long  GMT_OFFSET = 3600;
@@ -45,6 +45,18 @@ static bool     displayOn        = true;
 static uint8_t  currentContrast  = 200;
 static bool     manualBrightness = false;
 const char*     brightnessLabel  = "Day";
+
+// ─── Секундомер ───────────────────────────────────────────
+enum SwState { SW_IDLE, SW_RUNNING, SW_PAUSED };
+static SwState   swState    = SW_IDLE;
+static uint32_t  swStartMs  = 0;   // millis() момент старта текущего отрезка
+static uint32_t  swAccumMs  = 0;   // накопленное время предыдущих отрезков, мс
+
+uint32_t swElapsed() {
+    if (swState == SW_RUNNING)
+        return swAccumMs + (millis() - swStartMs);
+    return swAccumMs;
+}
 
 uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0, 99); }
 
@@ -201,6 +213,9 @@ void handleNotFound() {
     server.send(404, "text/plain", "Not found");
 }
 
+// ─── Forward declarations ─────────────────────────────────
+void drawOLED();
+
 // ─── WebSocket ────────────────────────────────────────────
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
@@ -209,6 +224,28 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
+    } else if (type == WStype_TEXT) {
+        Serial.printf("WS #%d TEXT: %.*s\n", num, (int)length, (char*)payload);
+        // Команды секундомера: "sw:start" / "sw:pause" / "sw:reset"
+        if (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) {
+            if (swState != SW_RUNNING) {
+                swStartMs = millis();
+                swState   = SW_RUNNING;
+                Serial.println("Stopwatch START");
+            }
+        } else if (length >= 8 && strncmp((char*)payload, "sw:pause", 8) == 0) {
+            if (swState == SW_RUNNING) {
+                swAccumMs += millis() - swStartMs;
+                swState    = SW_PAUSED;
+                Serial.println("Stopwatch PAUSE");
+            }
+        } else if (length >= 8 && strncmp((char*)payload, "sw:reset", 8) == 0) {
+            swState        = SW_IDLE;
+            swAccumMs      = 0;
+            swStartMs      = 0;
+            prevTimeBuf[0] = '\0';
+            Serial.println("Stopwatch RESET");
+        }
     }
 }
 
@@ -265,41 +302,80 @@ void drawOLED() {
     if (!displayOn) return;
     u8g2.clearBuffer();
 
-    char hh[3] = { timeBuf[0], timeBuf[1], 0 };
-    char mm[3] = { timeBuf[3], timeBuf[4], 0 };
-    char ss[3] = { timeBuf[6], timeBuf[7], 0 };
+    if (swState != SW_IDLE) {
+        // ── Режим секундомера ──────────────────────────
+        uint32_t ms    = swElapsed();
+        uint8_t  mins  = (ms / 60000) % 100;
+        uint8_t  secs  = (ms / 1000)  % 60;
+        uint16_t millis_part = ms % 1000;
 
-    u8g2.setFont(u8g2_font_logisoso46_tr);
-    int dw  = u8g2.getStrWidth("00");
-    int cw  = u8g2.getStrWidth(":");
-    const int gap = 5;
-    int total  = dw * 3 + cw * 2 + gap * 4;
-    int margin = (256 - total) / 2;
+        char mmss[6];
+        snprintf(mmss, sizeof(mmss), "%02d:%02d", mins, secs);
+        char msStr[4];
+        snprintf(msStr, sizeof(msStr), ".%03d", millis_part);
 
-    int x = margin;
-    u8g2.drawStr(x, 50, hh);  x += dw + gap;
-    u8g2.drawStr(x, 50, ":"); x += cw + gap;
-    u8g2.drawStr(x, 50, mm);  x += dw + gap;
-    u8g2.drawStr(x, 50, ":"); x += cw + gap;
-    u8g2.drawStr(x, 50, ss);
+        // Большие MM:SS
+        u8g2.setFont(u8g2_font_logisoso46_tr);
+        int mainW = u8g2.getStrWidth(mmss);
+        u8g2.setFont(u8g2_font_logisoso24_tr);
+        int msW = u8g2.getStrWidth(msStr);
 
-    u8g2.drawHLine(0, 53, 256);
+        int totalW  = mainW + msW + 4;
+        int xMain   = (256 - totalW) / 2;
+        int xMs     = xMain + mainW + 4;
 
-    u8g2.setFont(u8g2_font_5x7_tr);
-    if (timeSynced) {
-        char ssidShort[10];
-        strncpy(ssidShort, WIFI_SSID, 8);
-        ssidShort[8] = 0;
-        char bottom[56];
-        if (localIP.length())
-            snprintf(bottom, sizeof(bottom), "%s %s | %s %s",
-                     dayShortBuf, dateBuf, ssidShort, localIP.c_str());
-        else
-            snprintf(bottom, sizeof(bottom), "%s %s", dayShortBuf, dateBuf);
-        u8g2.drawStr(2, 63, bottom);
+        u8g2.setFont(u8g2_font_logisoso46_tr);
+        u8g2.drawStr(xMain, 50, mmss);
+        u8g2.setFont(u8g2_font_logisoso24_tr);
+        u8g2.drawStr(xMs, 50, msStr);
+
+        u8g2.drawHLine(0, 53, 256);
+
+        // Статус внизу
+        u8g2.setFont(u8g2_font_5x7_tr);
+        const char* statusStr = (swState == SW_RUNNING) ? "STOPWATCH  RUNNING" : "STOPWATCH  PAUSED";
+        int statusW = u8g2.getStrWidth(statusStr);
+        u8g2.drawStr((256 - statusW) / 2, 63, statusStr);
+
     } else {
-        u8g2.drawStr(2, 63, "NO NTP");
+        // ── Обычный режим часов ────────────────────────
+        char hh[3] = { timeBuf[0], timeBuf[1], 0 };
+        char mm[3] = { timeBuf[3], timeBuf[4], 0 };
+        char ss[3] = { timeBuf[6], timeBuf[7], 0 };
+
+        u8g2.setFont(u8g2_font_logisoso46_tr);
+        int dw  = u8g2.getStrWidth("00");
+        int cw  = u8g2.getStrWidth(":");
+        const int gap = 5;
+        int total  = dw * 3 + cw * 2 + gap * 4;
+        int margin = (256 - total) / 2;
+
+        int x = margin;
+        u8g2.drawStr(x, 50, hh);  x += dw + gap;
+        u8g2.drawStr(x, 50, ":"); x += cw + gap;
+        u8g2.drawStr(x, 50, mm);  x += dw + gap;
+        u8g2.drawStr(x, 50, ":"); x += cw + gap;
+        u8g2.drawStr(x, 50, ss);
+
+        u8g2.drawHLine(0, 53, 256);
+
+        u8g2.setFont(u8g2_font_5x7_tr);
+        if (timeSynced) {
+            char ssidShort[10];
+            strncpy(ssidShort, WIFI_SSID, 8);
+            ssidShort[8] = 0;
+            char bottom[56];
+            if (localIP.length())
+                snprintf(bottom, sizeof(bottom), "%s %s | %s %s",
+                         dayShortBuf, dateBuf, ssidShort, localIP.c_str());
+            else
+                snprintf(bottom, sizeof(bottom), "%s %s", dayShortBuf, dateBuf);
+            u8g2.drawStr(2, 63, bottom);
+        } else {
+            u8g2.drawStr(2, 63, "NO NTP");
+        }
     }
+
     u8g2.sendBuffer();
 }
 
@@ -340,11 +416,21 @@ void loop() {
     webSocket.loop();
     updateTimeStrings();
 
-    if (strcmp(timeBuf, prevTimeBuf) != 0) {
-        updateBrightness();
+    if (swState == SW_RUNNING) {
+        // Секундомер активен — перерисовываем дисплей каждые ~100 мс
         drawOLED();
-        strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
-        broadcastState();
+        // Часы в браузере продолжают идти: broadcastState раз в секунду
+        if (strcmp(timeBuf, prevTimeBuf) != 0) {
+            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+            broadcastState();
+        }
+    } else {
+        if (strcmp(timeBuf, prevTimeBuf) != 0) {
+            updateBrightness();
+            drawOLED();
+            strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf));
+            broadcastState();
+        }
     }
 
     uint32_t workUs = micros() - t0;
