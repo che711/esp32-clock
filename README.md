@@ -14,7 +14,7 @@ Clean minimalist firmware, a stylish live web dashboard, REST API and WebSocket 
 - Automatic brightness by time of day, plus manual control and full display off
 - Stylish live web interface (WebSocket) with a seconds progress bar and light/dark themes
 - Stopwatch with lap times — synced from the device, so a page reload picks up the real running state
-- Detailed device stats (temperature, RAM, Wi-Fi, CPU, uptime)
+- Detailed device stats (die temperature, RAM, Wi-Fi, uptime)
 - Full REST API + WebSocket for smart-home integrations
 - `clock.local` access via mDNS
 - Native unit tests (run without hardware) and CI with GitHub Actions
@@ -184,6 +184,8 @@ Firmware steps already applied to keep it cooler:
 
 - **CPU at 80 MHz** (`setCpuFrequencyMhz(80)`) instead of 160 — plenty for a clock + web server, and the single biggest lever on die heat. 80 MHz is the minimum at which Wi-Fi still works.
 - **Wi-Fi modem sleep** (`WiFi.setSleep(true)`) — the radio sleeps between beacons.
+
+No CPU-load figure is shown: a reliable instantaneous CPU % is incompatible with the Wi-Fi light-sleep used here (during light sleep the core halts, which any idle-based meter misreads as "load"), and it isn't useful telemetry for a clock. RAM, die temp and uptime are shown instead — they are stable and meaningful. The die-temperature read is cached (every 10 s) to avoid a periodic blocking call.
 
 Hardware option: powering the board via the **3.3V pin** (bypassing the LDO) runs noticeably cooler than 5V USB. For accurate *ambient* temperature, use an external sensor (e.g. BMP280) — the die sensor is not meant for that.
 

@@ -6,7 +6,6 @@
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
-#include "esp_freertos_hooks.h"
 #include "web_ui.h"
 #include "clock_utils.h"
 
@@ -49,15 +48,6 @@ bool timeSynced   = false;
 String localIP    = "";
 
 static uint32_t requestCount     = 0;
-
-// ─── Реальная загрузка CPU через idle-hook ────────────────
-// idle-hook вызывается, когда ядро простаивает. Считаем инкременты за
-// окно 1 с и сравниваем с максимумом (≈100% простоя) — self-calibration.
-static volatile uint32_t idleCount = 0;
-static uint32_t idleMax    = 1;
-static uint8_t  cpuLoadPct = 0;
-static bool idleHook() { idleCount++; return true; }
-
 static bool     displayOn        = true;
 static uint8_t  currentContrast  = 255;
 static bool     manualBrightness = false;
@@ -75,20 +65,17 @@ uint32_t swElapsed() {
     return swAccumMs;
 }
 
-uint8_t getCpuLoad() { return cpuLoadPct; }
-
-// Обновление загрузки: окно 1 с, load = 100 * (1 - idle/idleMax)
-void updateCpuLoad() {
-    static uint32_t lastWin = 0;
+// Температура кристалла: читаем не чаще раза в 10 с (temperatureRead
+// на C3 может блокировать на десятки мс — незачем дёргать каждую секунду).
+float getDieTemp() {
+    static float    cached = 0.0f;
+    static uint32_t last   = 0;
     uint32_t now = millis();
-    if (now - lastWin < 1000) return;
-    lastWin = now;
-    uint32_t c = idleCount;
-    idleCount = 0;
-    if (c > idleMax) idleMax = c;                       // калибровка «100% простоя»
-    if (idleMax < 1000) return;                         // idle-hook ещё не считает — не портим показания
-    uint32_t used = (uint32_t)((uint64_t)c * 100 / idleMax);
-    cpuLoadPct = (uint8_t)(used > 100 ? 0 : 100 - used);
+    if (last == 0 || now - last >= 10000) {
+        last   = now ? now : 1;
+        cached = temperatureRead();
+    }
+    return cached;
 }
 
 // ─── Дисплей вкл/выкл ────────────────────────────────────
@@ -142,7 +129,6 @@ void buildJson(char* buf, size_t sz) {
         "\"ip\":\"%s\","
         "\"rssi\":%d,"
         "\"temp\":\"%.1f\","
-        "\"cpu\":%d,"
         "\"ram_free\":%lu,"
         "\"ram_total\":%lu,"
         "\"brightness_pct\":%d,"
@@ -157,8 +143,7 @@ void buildJson(char* buf, size_t sz) {
         uptimeBuf,
         WIFI_SSID, localIP.c_str(),
         (int)WiFi.RSSI(),
-        (float)temperatureRead(),
-        getCpuLoad(),
+        (float)getDieTemp(),
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)ESP.getHeapSize(),
         brightnessPct(currentContrast),
@@ -466,8 +451,6 @@ void setup() {
     setCpuFrequencyMhz(80);
     Serial.printf("CPU @ %u MHz\n", getCpuFrequencyMhz());
 
-    esp_register_freertos_idle_hook(idleHook);   // реальная загрузка CPU
-
     u8g2.begin();
     u8g2.setContrast(currentContrast);
     u8g2.clearBuffer();
@@ -523,15 +506,13 @@ void loop() {
     static uint32_t lastHb = 0;
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
-        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u load=%u%%\n",
+        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
                       (int)WiFi.RSSI(),
-                      (unsigned)esp_get_free_heap_size(),
-                      cpuLoadPct);
+                      (unsigned)esp_get_free_heap_size());
     }
 
-    updateCpuLoad();
     delay(100);
 }
