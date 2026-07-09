@@ -6,6 +6,7 @@
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
+#include "esp_freertos_hooks.h"
 #include "web_ui.h"
 #include "clock_utils.h"
 
@@ -48,6 +49,16 @@ bool timeSynced   = false;
 String localIP    = "";
 
 static uint32_t requestCount     = 0;
+
+// ─── Усреднённая загрузка CPU (idle-hook + EMA) ───────────
+// idle-hook тикает в простое; за окно 1 с считаем мгновенную загрузку
+// относительно калибровочного максимума и сглаживаем EMA (~7 c),
+// чтобы убрать всплески от фоновых задач WiFi/TCP.
+static volatile uint32_t idleCount = 0;
+static uint32_t idleMax    = 1;
+static float    loadAvg    = 0.0f;
+static bool idleHook() { idleCount++; return true; }
+
 static bool     displayOn        = true;
 static uint8_t  currentContrast  = 255;
 static bool     manualBrightness = false;
@@ -76,6 +87,23 @@ float getDieTemp() {
         cached = temperatureRead();
     }
     return cached;
+}
+
+uint8_t getCpuLoad() { return (uint8_t)(loadAvg + 0.5f); }
+
+// Обновление загрузки раз в секунду + EMA-сглаживание.
+void updateCpuLoad() {
+    static uint32_t lastWin = 0;
+    uint32_t now = millis();
+    if (now - lastWin < 1000) return;
+    lastWin = now;
+    uint32_t c = idleCount;
+    idleCount = 0;
+    if (c > idleMax) idleMax = c;                 // калибровка «100% простоя» (потолок — не переоценить)
+    if (idleMax < 1000) return;                   // idle-hook ещё не считает — ждём калибровки
+    uint32_t used = (uint32_t)((uint64_t)c * 100 / idleMax);
+    float inst = (used > 100) ? 0.0f : (float)(100 - used);
+    loadAvg = loadAvg * 0.85f + inst * 0.15f;     // EMA, τ≈7 c
 }
 
 // ─── Дисплей вкл/выкл ────────────────────────────────────
@@ -129,6 +157,7 @@ void buildJson(char* buf, size_t sz) {
         "\"ip\":\"%s\","
         "\"rssi\":%d,"
         "\"temp\":\"%.1f\","
+        "\"cpu\":%d,"
         "\"ram_free\":%lu,"
         "\"ram_total\":%lu,"
         "\"brightness_pct\":%d,"
@@ -144,6 +173,7 @@ void buildJson(char* buf, size_t sz) {
         WIFI_SSID, localIP.c_str(),
         (int)WiFi.RSSI(),
         (float)getDieTemp(),
+        getCpuLoad(),
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)ESP.getHeapSize(),
         brightnessPct(currentContrast),
@@ -451,6 +481,8 @@ void setup() {
     setCpuFrequencyMhz(80);
     Serial.printf("CPU @ %u MHz\n", getCpuFrequencyMhz());
 
+    esp_register_freertos_idle_hook(idleHook);   // для усреднённой загрузки CPU
+
     u8g2.begin();
     u8g2.setContrast(currentContrast);
     u8g2.clearBuffer();
@@ -506,13 +538,15 @@ void loop() {
     static uint32_t lastHb = 0;
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
-        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u\n",
+        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u load=%u%%\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
                       (int)WiFi.RSSI(),
-                      (unsigned)esp_get_free_heap_size());
+                      (unsigned)esp_get_free_heap_size(),
+                      getCpuLoad());
     }
 
+    updateCpuLoad();
     delay(100);
 }
