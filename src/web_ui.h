@@ -6,324 +6,307 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ESP32 Clock</title>sudo dmesg | grep tty
-[sudo] password for andrew: 
-[    0.177606] printk: legacy console [tty0] enabled
-[    3.747882] cdc_acm 1-2:1.0: ttyACM0: USB ACM device
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<title>ESP32 Clock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
   :root {
-    --bg:          #0a1e46;
-    --bg-2:        #0d2352;
-    --card:        #0c214c;
-    --card-hi:     rgba(122,176,255,0.06);
-    --border:      #1c3d76;
-    --text:        #dbe8ff;
-    --text-dim:    #6c9bda;
-    --text-faint:  #33578f;
-    --accent:      #5b9bff;
-    --accent-soft: rgba(91,155,255,0.16);
-    --curl-bg:     #050c1c;
-    --curl-border: #122542;
-    --btn-bg:      #16295380;
-    --btn-color:   #8dbaff;
-    --wifi-off:    #1c3d76;
-    --slider-bg:   #071223;
-    --shadow:      0 10px 30px rgba(0,0,0,0.35);
+    --bg:          #0e0c09;
+    --bg-2:        #171009;
+    --surface:     #17130d;
+    --surface-2:   #1d170e;
+    --line:        #2c2318;
+    --line-soft:   #241d13;
+    --text:        #f3ead9;
+    --text-dim:    #b39c7d;
+    --text-faint:  #766444;
+    --accent:      #f5b13c;
+    --accent-2:    #ffd486;
+    --accent-soft: rgba(245,177,60,0.14);
+    --good:        #64d19b;
+    --warn:        #f0a53c;
+    --crit:        #ef6a5a;
+    --slider-bg:   #241d13;
+    --code:        #ffcf7a;
+    --shadow:      0 18px 46px rgba(0,0,0,0.55);
+    --glow:        0 0 34px rgba(245,177,60,0.16);
   }
 
   [data-theme="light"] {
-    --bg:          #e5eeff;
-    --bg-2:        #d7e5ff;
-    --card:        #f4f8ff;
-    --card-hi:     rgba(255,255,255,0.7);
-    --border:      #b2ccf0;
-    --text:        #0a1f47;
-    --text-dim:    #2a5db0;
-    --text-faint:  #6b95d4;
-    --accent:      #1f66d6;
-    --accent-soft: rgba(31,102,214,0.12);
-    --curl-bg:     #e6efff;
-    --curl-border: #b2ccf0;
-    --btn-bg:      #dbe9ff;
-    --btn-color:   #1a3f92;
-    --wifi-off:    #bcd2f2;
-    --slider-bg:   #cdddf6;
-    --shadow:      0 8px 24px rgba(31,66,132,0.14);
+    --bg:          #f6f0e5;
+    --bg-2:        #efe6d4;
+    --surface:     #fffdf8;
+    --surface-2:   #fbf5ea;
+    --line:        #e7dcc6;
+    --line-soft:   #efe6d5;
+    --text:        #2b2114;
+    --text-dim:    #7c6a4d;
+    --text-faint:  #ab9a7c;
+    --accent:      #c07d12;
+    --accent-2:    #a9690a;
+    --accent-soft: rgba(192,125,18,0.13);
+    --good:        #2f9e6a;
+    --warn:        #c07d12;
+    --crit:        #cf4b3a;
+    --slider-bg:   #eaddc5;
+    --code:        #8a5a08;
+    --shadow:      0 14px 34px rgba(120,90,40,0.16);
+    --glow:        0 0 26px rgba(192,125,18,0.14);
   }
 
   body {
     background:
-      radial-gradient(1200px 600px at 50% -10%, var(--bg-2), transparent 60%),
+      radial-gradient(1100px 520px at 50% -8%, var(--bg-2), transparent 62%),
       var(--bg);
     color: var(--text);
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
     min-height: 100vh; display: flex; flex-direction: column;
     align-items: center; justify-content: flex-start;
-    padding: 22px 16px 40px; gap: 12px;
-    transition: background 0.3s, color 0.3s;
+    padding: 24px 16px 48px; gap: 13px;
+    -webkit-font-smoothing: antialiased;
+    transition: background 0.4s, color 0.4s;
   }
 
   .card {
-    background:
-      linear-gradient(var(--card-hi), transparent 42%),
-      var(--card);
-    border: 1px solid var(--border);
-    border-radius: 18px; width: min(540px, 100%);
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px; width: min(560px, 100%);
     box-shadow: var(--shadow);
-    transition: background 0.3s, border-color 0.3s;
+    animation: rise 0.5s cubic-bezier(.2,.7,.3,1) both;
+    transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
   }
+  .card:hover { border-color: var(--line); transform: translateY(-1px); }
+  @keyframes rise { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: none; } }
+  .card:nth-of-type(2){animation-delay:.04s}.card:nth-of-type(3){animation-delay:.08s}
+  .card:nth-of-type(4){animation-delay:.12s}.card:nth-of-type(5){animation-delay:.16s}
+  .card:nth-of-type(6){animation-delay:.20s}.card:nth-of-type(7){animation-delay:.24s}
+
+  .eyebrow { font-size: 10px; font-weight: 600; color: var(--text-faint);
+             letter-spacing: 3px; text-transform: uppercase; }
 
   /* ── Шапка ── */
   .app-header {
-    width: min(540px, 100%);
+    width: min(560px, 100%);
     display: flex; align-items: center; justify-content: space-between;
-    padding: 2px 4px 4px;
+    padding: 4px 6px 2px;
   }
-  .app-title {
-    font-size: 13px; font-weight: 700; letter-spacing: 4px;
-    text-transform: uppercase; color: var(--text-dim);
-  }
-  .app-title b { color: var(--accent); font-weight: 700; }
+  .app-title { font-size: 13px; font-weight: 700; letter-spacing: 5px;
+               text-transform: uppercase; color: var(--text-dim); }
+  .app-title b { color: var(--accent); }
   .host-chip {
     font-family: 'JetBrains Mono', monospace; font-size: 11px;
-    color: var(--text-dim); background: var(--accent-soft);
-    border: 1px solid var(--border); border-radius: 999px;
-    padding: 4px 11px; letter-spacing: 0.5px;
+    color: var(--accent); background: var(--accent-soft);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 4px 12px; letter-spacing: 0.4px;
   }
 
   .theme-btn {
-    position: fixed; top: 14px; right: 14px;
-    width: 40px; height: 40px; border-radius: 50%;
-    background: var(--card); border: 1px solid var(--border);
-    color: var(--text-dim); font-size: 18px; cursor: pointer;
+    position: fixed; top: 16px; right: 16px;
+    width: 42px; height: 42px; border-radius: 50%;
+    background: var(--surface); border: 1px solid var(--line);
+    color: var(--accent); font-size: 18px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     z-index: 50; box-shadow: var(--shadow);
-    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    transition: transform 0.25s, border-color 0.2s;
   }
-  .theme-btn:hover { border-color: var(--accent); color: var(--accent); transform: rotate(-12deg); }
+  .theme-btn:hover { border-color: var(--accent); transform: rotate(-18deg) scale(1.05); }
 
   /* ── Часы ── */
-  .clock-card { padding: 30px 24px 22px; text-align: center; overflow: hidden; }
-  #time {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: clamp(44px, 10vw, 82px); font-weight: 700;
-    letter-spacing: -1px; line-height: 1; color: var(--text); white-space: nowrap;
-  }
-  /* Сигнатурный элемент: полоса прогресса секунд */
-  .sec-track {
-    height: 3px; border-radius: 3px; background: var(--slider-bg);
-    margin: 20px auto 0; overflow: hidden; max-width: 320px;
-  }
-  #sec-bar {
-    height: 100%; width: 0%; border-radius: 3px;
-    background: linear-gradient(90deg, var(--accent), #9ec5ff);
-    box-shadow: 0 0 8px var(--accent-soft);
-    transition: width 0.9s linear;
-  }
-  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0 14px; }
-  #date { font-size: clamp(15px, 3.5vw, 20px); font-weight: 600; color: var(--text-dim); letter-spacing: 3px; text-transform: uppercase; }
-  #day  { font-size: clamp(12px, 2.5vw, 15px); font-weight: 500; color: var(--text-faint); letter-spacing: 5px; margin-top: 5px; text-transform: uppercase; }
-
-  /* ── Статистика ── */
-  .stats-card { padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
-  .stats-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  .stat       { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-  .stat-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
-  .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 500; color: var(--text); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .unit       { font-size: 13px; color: var(--text-dim); margin-left: 2px; }
-
-  .req-badge { display: inline-flex; align-items: center; gap: 6px; }
-  .req-dot   { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: pulse-dot 2s infinite; }
-  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
-
-  .wifi-row  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .wifi-dots { display: inline-flex; gap: 3px; align-items: flex-end; }
-  .wifi-dots span { display: inline-block; width: 6px; border-radius: 2px; background: var(--wifi-off); transition: background 0.3s; }
-  .wifi-dots span.on { background: var(--accent); }
-
-  .cpu-row       { display: flex; align-items: center; gap: 10px; }
-  .cpu-mini-bar  { flex: 1; height: 5px; background: var(--slider-bg); border-radius: 3px; overflow: hidden; max-width: 80px; }
-  .cpu-mini-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 1s ease; }
-  .cpu-mini-fill.warn { background: #d97706; }
-  .cpu-mini-fill.crit { background: #dc2626; }
-
-  /* ── Яркость ── */
-  .brightness-card { padding: 20px 24px; }
-  .brightness-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-  .brightness-left { display: flex; align-items: center; gap: 10px; }
-  .brightness-title  { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
-  .level-chip {
-    font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-    color: var(--accent); background: var(--accent-soft);
-    border-radius: 999px; padding: 3px 9px;
-  }
-  .brightness-mode   { display: flex; gap: 6px; }
-
-  .mode-btn {
-    font-size: 11px; font-weight: 600; letter-spacing: 1px;
-    padding: 5px 14px; border-radius: 6px;
-    border: 1px solid var(--border);
-    background: transparent; color: var(--text-faint);
-    text-transform: uppercase; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-    user-select: none; -webkit-user-select: none;
-  }
-  .mode-btn.active {
-    background: var(--accent); border-color: var(--accent); color: #fff;
+  .clock-card { padding: 34px 26px 26px; text-align: center; overflow: hidden; }
+  .clock-card::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(420px 150px at 50% 22%, var(--accent-soft), transparent 70%);
     pointer-events: none;
   }
-  .mode-btn:not(.active):hover { border-color: var(--accent); color: var(--text-dim); }
+  .clock-eyebrow { position: relative; margin-bottom: 12px; }
+  #time {
+    position: relative;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(46px, 11vw, 88px); font-weight: 700;
+    letter-spacing: -1px; line-height: 0.98; color: var(--text);
+    white-space: nowrap;
+    text-shadow: 0 0 22px rgba(245,177,60,0.28);
+  }
+  [data-theme="light"] #time { text-shadow: none; }
+  .sec-track { position: relative; height: 3px; border-radius: 3px;
+               background: var(--slider-bg); margin: 22px auto 0;
+               overflow: hidden; max-width: 340px; }
+  #sec-bar { height: 100%; width: 0%; border-radius: 3px;
+             background: linear-gradient(90deg, var(--accent), var(--accent-2));
+             box-shadow: 0 0 10px var(--accent-soft);
+             transition: width 0.9s linear; }
+  .clock-meta { position: relative; display: flex; align-items: center;
+                justify-content: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+  #date { font-family: 'JetBrains Mono', monospace; font-size: clamp(14px,3.4vw,19px);
+          font-weight: 500; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
+  .meta-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: .7; }
+  #day { font-size: clamp(11px,2.4vw,13px); font-weight: 600; color: var(--text-faint);
+         letter-spacing: 4px; text-transform: uppercase; }
+
+  /* ── Секции ── */
+  .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .section-title { font-size: 11px; font-weight: 700; color: var(--text-faint);
+                   letter-spacing: 2px; text-transform: uppercase; }
+
+  /* ── Статистика ── */
+  .stats-card { padding: 22px 24px; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tile { background: var(--surface-2); border: 1px solid var(--line-soft);
+          border-radius: 13px; padding: 13px 15px; display: flex;
+          flex-direction: column; gap: 7px; min-width: 0; }
+  .tile.wide { grid-column: 1 / -1; }
+  .tile-label { font-size: 10px; font-weight: 700; color: var(--text-faint);
+                letter-spacing: 1.5px; text-transform: uppercase; }
+  .tile-value { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 500;
+                color: var(--text); line-height: 1.2; white-space: nowrap;
+                overflow: hidden; text-overflow: ellipsis; }
+  .unit { font-size: 12px; color: var(--text-dim); margin-left: 3px; }
+
+  .req-badge { display: inline-flex; align-items: center; gap: 7px; }
+  .req-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+             flex-shrink: 0; animation: pulse-dot 2s infinite; box-shadow: 0 0 8px var(--accent); }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.7)} }
+
+  .inline-row { display: flex; align-items: center; gap: 10px; }
+  .wifi-dots { display: inline-flex; gap: 3px; align-items: flex-end; margin-left: auto; }
+  .wifi-dots span { display: inline-block; width: 6px; border-radius: 2px; background: var(--slider-bg); transition: background 0.3s; }
+  .wifi-dots span.on { background: var(--accent); box-shadow: 0 0 6px var(--accent-soft); }
+
+  .mini-bar { flex: 1; height: 5px; background: var(--slider-bg); border-radius: 3px; overflow: hidden; min-width: 40px; }
+  .cpu-mini-fill, .ram-bar-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 1s ease; }
+  .cpu-mini-fill.warn, .ram-bar-fill.warn { background: var(--warn); }
+  .cpu-mini-fill.crit, .ram-bar-fill.crit { background: var(--crit); }
+  .ram-sub { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── Яркость ── */
+  .brightness-card { padding: 22px 24px; }
+  .brightness-left { display: flex; align-items: center; gap: 10px; }
+  .level-chip { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+                color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 3px 10px; }
+  .seg { display: flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--line-soft);
+         border-radius: 9px; padding: 3px; }
+  .mode-btn { font-size: 11px; font-weight: 600; letter-spacing: 1px; padding: 5px 14px;
+              border-radius: 6px; border: none; background: transparent; color: var(--text-faint);
+              text-transform: uppercase; cursor: pointer; user-select: none; -webkit-user-select: none;
+              transition: background 0.15s, color 0.15s; }
+  .mode-btn.active { background: var(--accent); color: #1a1206; pointer-events: none; }
+  .mode-btn:not(.active):hover { color: var(--text-dim); }
 
   .slider-row { display: flex; align-items: center; gap: 14px; }
-  .brightness-icon { font-size: 14px; flex-shrink: 0; opacity: 0.6; }
-
+  .brightness-icon { font-size: 14px; flex-shrink: 0; opacity: 0.65; }
   input[type="range"] {
-    -webkit-appearance: none; appearance: none;
-    flex: 1; height: 6px; border-radius: 3px; outline: none;
-    background: linear-gradient(var(--accent), var(--accent)) 0/50% 100% no-repeat,
-                var(--slider-bg);
+    -webkit-appearance: none; appearance: none; flex: 1; height: 6px; border-radius: 3px; outline: none;
+    background: linear-gradient(var(--accent), var(--accent)) 0/50% 100% no-repeat, var(--slider-bg);
     cursor: pointer; transition: opacity 0.2s;
   }
   input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 18px; height: 18px; border-radius: 50%;
-    background: #fff; border: 2px solid var(--accent);
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    cursor: pointer; transition: transform 0.15s;
+    -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent-2); border: 2px solid var(--accent);
+    box-shadow: 0 0 10px var(--accent-soft); cursor: pointer; transition: transform 0.15s;
   }
-  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-  input[type="range"]::-moz-range-thumb {
-    width: 18px; height: 18px; border-radius: 50%;
-    background: #fff; border: 2px solid var(--accent); cursor: pointer;
-  }
-  input[type="range"].disabled-slider {
-    opacity: 0.35; pointer-events: none; cursor: not-allowed;
-  }
-  .brightness-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600; color: var(--text); min-width: 40px; text-align: right; }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.18); }
+  input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent-2); border: 2px solid var(--accent); cursor: pointer; }
+  input[type="range"].disabled-slider { opacity: 0.3; pointer-events: none; cursor: not-allowed; }
+  .brightness-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600;
+                    color: var(--text); min-width: 42px; text-align: right; }
 
   /* ── Управление ── */
-  .controls-card {
-    padding: 16px 24px; display: flex;
-    align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  }
-  .controls-left  { display: flex; flex-direction: column; gap: 4px; }
-  .controls-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
-  #uptime-label   { font-family: 'JetBrains Mono', monospace; font-size: 17px; color: var(--text); }
+  .controls-card { padding: 18px 24px; display: flex; align-items: center;
+                   justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .controls-left { display: flex; flex-direction: column; gap: 4px; }
+  .controls-label { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
+  #uptime-label { font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--text); }
   .controls-right { display: flex; gap: 10px; flex-shrink: 0; }
-
-  .btn-action {
-    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 700;
-    letter-spacing: 1px; padding: 10px 18px; border-radius: 9px;
-    cursor: pointer; text-transform: uppercase; white-space: nowrap;
-    border: 1px solid var(--border); background: var(--btn-bg); color: var(--btn-color);
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
-  }
+  .btn-action { font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700;
+                letter-spacing: 0.6px; padding: 11px 18px; border-radius: 11px; cursor: pointer;
+                text-transform: uppercase; white-space: nowrap; border: 1px solid var(--line);
+                background: var(--surface-2); color: var(--text-dim);
+                transition: background 0.2s, border-color 0.2s, color 0.2s; }
   .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .btn-power.on  { border-color: #16a34a; color: #16a34a; }
-  .btn-power.off { border-color: #dc2626; color: #dc2626; }
-  .btn-power.on:hover:not(:disabled)  { background: #16a34a; color: #fff; }
-  .btn-power.off:hover:not(:disabled) { background: #dc2626; color: #fff; }
-  .btn-reboot:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; color: #fff; }
-
-  /* ── curl ── */
-  .curl-card  { padding: 18px 24px; background: var(--curl-bg); border-color: var(--curl-border); }
-  .curl-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 12px; }
-  .curl-line  { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #79c0ff; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: all; }
-  .curl-note  { color: var(--text-faint); font-size: 11px; display: block; margin-top: 4px; }
-
-  /* ── Статус ── */
-  .status-bar   { display: flex; align-items: center; gap: 14px; font-size: 11px; font-weight: 500; color: var(--text-faint); letter-spacing: 1.5px; margin-top: 4px; }
-  .ws-indicator { display: flex; align-items: center; gap: 5px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
-  .ws-dot { width: 7px; height: 7px; border-radius: 50%; background: #6b7280; transition: background 0.3s; }
-  .ws-dot.connected    { background: #16a34a; animation: pulse 2s infinite; }
-  .ws-dot.disconnected { background: #dc2626; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-
-  .toast {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    background: var(--card); border: 1px solid var(--border);
-    color: var(--text); font-size: 14px; font-weight: 500;
-    padding: 12px 24px; border-radius: 10px; box-shadow: var(--shadow);
-    opacity: 0; transition: opacity 0.3s;
-    pointer-events: none; white-space: nowrap; z-index: 100;
-  }
-  .toast.show { opacity: 1; }
-
-  /* ── curl copy buttons ── */
-  .curl-row { display: flex; align-items: center; gap: 10px; }
-  .curl-row .curl-line { flex: 1; margin: 0; }
-  .curl-copy {
-    flex-shrink: 0; padding: 3px 10px; border-radius: 5px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
-    border: 1px solid var(--curl-border); background: transparent;
-    color: var(--text-faint); cursor: pointer; text-transform: uppercase;
-    font-family: 'Inter', sans-serif;
-    transition: border-color 0.15s, color 0.15s, background 0.15s;
-  }
-  .curl-copy:hover { border-color: var(--accent); color: var(--accent); }
-  .curl-copy.copied { border-color: #16a34a; color: #16a34a; }
-
-  /* ── RAM bar ── */
-  .ram-row { display: flex; flex-direction: column; gap: 5px; }
-  .ram-bar-wrap { height: 4px; background: var(--slider-bg); border-radius: 2px; overflow: hidden; max-width: 200px; }
-  .ram-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 1s ease; }
-  .ram-bar-fill.warn { background: #d97706; }
-  .ram-bar-fill.crit { background: #dc2626; }
+  .btn-power.on { border-color: var(--good); color: var(--good); }
+  .btn-power.off { border-color: var(--crit); color: var(--crit); }
+  .btn-power.on:hover:not(:disabled) { background: var(--good); color: #08130c; }
+  .btn-power.off:hover:not(:disabled) { background: var(--crit); color: #1a0805; }
+  .btn-reboot:hover:not(:disabled) { background: var(--crit); border-color: var(--crit); color: #1a0805; }
 
   /* ── Секундомер ── */
   .stopwatch-card { padding: 22px 24px; }
-  .stopwatch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-  .stopwatch-title { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
   .sw-sync { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); }
-  .sw-display {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: clamp(32px, 7vw, 56px); font-weight: 700;
-    letter-spacing: 2px; text-align: center; color: var(--text);
-    line-height: 1; margin-bottom: 16px;
-  }
-  .sw-display .sw-ms { font-size: 0.45em; color: var(--text-dim); vertical-align: baseline; }
+  .sw-display { font-family: 'JetBrains Mono', monospace; font-size: clamp(34px,8vw,60px);
+                font-weight: 700; letter-spacing: 2px; text-align: center; color: var(--text);
+                line-height: 1; margin: 6px 0 18px; text-shadow: 0 0 18px rgba(245,177,60,0.18); }
+  [data-theme="light"] .sw-display { text-shadow: none; }
+  .sw-display .sw-ms { font-size: 0.42em; color: var(--accent); vertical-align: baseline; }
   .sw-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .sw-btn {
-    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 700;
-    letter-spacing: 1px; padding: 10px 22px; border-radius: 9px;
-    cursor: pointer; text-transform: uppercase; white-space: nowrap;
-    border: 1px solid var(--border); background: var(--btn-bg); color: var(--btn-color);
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
-    min-width: 90px;
-  }
+  .sw-btn { font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700;
+            letter-spacing: 0.6px; padding: 11px 22px; border-radius: 11px; cursor: pointer;
+            text-transform: uppercase; white-space: nowrap; border: 1px solid var(--line);
+            background: var(--surface-2); color: var(--text-dim); min-width: 92px;
+            transition: background 0.2s, border-color 0.2s, color 0.2s; }
   .sw-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  #sw-start-btn { border-color: #16a34a; color: #16a34a; }
-  #sw-start-btn:hover { background: #16a34a; color: #fff; }
-  #sw-start-btn.running { border-color: #d97706; color: #d97706; }
-  #sw-start-btn.running:hover { background: #d97706; color: #fff; }
-  #sw-reset-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #sw-lap-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .sw-laps { margin-top: 14px; max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
-  .sw-lap-item {
-    display: flex; align-items: center; justify-content: space-between;
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    padding: 5px 10px; border-radius: 6px;
-    background: var(--curl-bg); border: 1px solid var(--curl-border);
-  }
+  #sw-start-btn { border-color: var(--good); color: var(--good); }
+  #sw-start-btn:hover { background: var(--good); color: #08130c; }
+  #sw-start-btn.running { border-color: var(--warn); color: var(--warn); }
+  #sw-start-btn.running:hover { background: var(--warn); color: #1a1206; }
+  #sw-reset-btn:hover:not(:disabled), #sw-lap-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .sw-laps { margin-top: 16px; max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+  .sw-lap-item { display: flex; align-items: center; justify-content: space-between;
+                 font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 6px 12px;
+                 border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); }
   .sw-lap-num { color: var(--text-faint); font-size: 11px; }
   .sw-lap-time { color: var(--text); }
-  .sw-lap-delta { color: var(--text-dim); font-size: 11px; }
+  .sw-lap-delta { color: var(--accent); font-size: 11px; }
   .sw-laps:empty { display: none; }
 
-  /* ── Chip info card ── */
-  .chip-card { padding: 18px 24px; }
-  .chip-label { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 14px; }
-  .chip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
-  .chip-item { display: flex; flex-direction: column; gap: 2px; }
-  .chip-key  { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; }
-  .chip-val  { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text); }
+  /* ── curl ── */
+  .curl-card { padding: 20px 24px; }
+  .curl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .curl-line { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--code);
+               flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: all;
+               background: var(--surface-2); border: 1px solid var(--line-soft);
+               border-radius: 8px; padding: 8px 11px; }
+  .curl-copy { flex-shrink: 0; padding: 6px 11px; border-radius: 7px; font-size: 10px; font-weight: 700;
+               letter-spacing: 0.6px; border: 1px solid var(--line); background: var(--surface-2);
+               color: var(--text-faint); cursor: pointer; text-transform: uppercase;
+               font-family: 'Space Grotesk', sans-serif;
+               transition: border-color 0.15s, color 0.15s; }
+  .curl-copy:hover { border-color: var(--accent); color: var(--accent); }
+  .curl-copy.copied { border-color: var(--good); color: var(--good); }
+  .curl-note { font-family: 'JetBrains Mono', monospace; color: var(--text-faint); font-size: 11px; margin-top: 6px; }
 
+  /* ── Chip info ── */
+  .chip-card { padding: 20px 24px; }
+  .chip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }
+  .chip-item { display: flex; flex-direction: column; gap: 3px; }
+  .chip-key { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; }
+  .chip-val { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text); }
+
+  /* ── Статус / toast ── */
+  .status-bar { display: flex; align-items: center; gap: 14px; font-size: 11px; font-weight: 500;
+                color: var(--text-faint); letter-spacing: 1.5px; margin-top: 4px; }
+  .ws-indicator { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+  .ws-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); transition: background 0.3s; }
+  .ws-dot.connected { background: var(--good); animation: pulse 2s infinite; box-shadow: 0 0 8px var(--good); }
+  .ws-dot.disconnected { background: var(--crit); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+           background: var(--surface); border: 1px solid var(--accent); color: var(--text);
+           font-size: 14px; font-weight: 500; padding: 13px 24px; border-radius: 12px;
+           box-shadow: var(--shadow); opacity: 0; transition: opacity 0.3s;
+           pointer-events: none; white-space: nowrap; z-index: 100; }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 420px) {
+    .stat-grid { grid-template-columns: 1fr; }
+    .chip-grid { grid-template-columns: 1fr; }
+  }
   @media (prefers-reduced-motion: reduce) {
-    * { animation: none !important; transition: none !important; }
+    *, .card { animation: none !important; transition: none !important; }
   }
 </style>
 </head>
@@ -331,7 +314,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
 
-<!-- Шапка -->
 <div class="app-header">
   <div class="app-title">ESP32 <b>CLOCK</b></div>
   <div class="host-chip" id="host-chip">clock.local</div>
@@ -339,84 +321,48 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <!-- Часы -->
 <div class="card clock-card">
+  <div class="eyebrow clock-eyebrow">Local time</div>
   <div id="time">--:--:--</div>
   <div class="sec-track"><div id="sec-bar"></div></div>
-  <hr class="divider">
-  <div id="date">-- --- ----</div>
-  <div id="day">---------</div>
+  <div class="clock-meta">
+    <span id="date">-- --- ----</span>
+    <span class="meta-dot"></span>
+    <span id="day">---------</span>
+  </div>
 </div>
 
-<!-- Статистика -->
-<div class="card stats-card">
-  <div class="stats-row">
-    <div class="stat">
-      <div class="stat-label">Temperature</div>
-      <div class="stat-value"><span id="temp">—</span><span class="unit">°C</span></div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">CPU Load</div>
-      <div class="cpu-row">
-        <div class="stat-value"><span id="cpu-val">—</span><span class="unit">%</span></div>
-        <div class="cpu-mini-bar"><div class="cpu-mini-fill" id="cpu-bar" style="width:0%"></div></div>
-      </div>
-    </div>
+<!-- Секундомер -->
+<div class="card stopwatch-card">
+  <div class="section-head">
+    <div class="section-title">Stopwatch</div>
+    <span class="sw-sync" id="sw-sync">synced with device</span>
   </div>
-  <div class="stats-row">
-    <div class="stat">
-      <div class="stat-label">WiFi SSID</div>
-      <div class="stat-value" id="ssid">—</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">IP Address</div>
-      <div class="stat-value" id="ip">—</div>
-    </div>
+  <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
+  <div class="sw-controls">
+    <button class="sw-btn" id="sw-start-btn" onclick="swToggle()">Start</button>
+    <button class="sw-btn" id="sw-lap-btn"   onclick="swLap()"    disabled>Lap</button>
+    <button class="sw-btn" id="sw-reset-btn" onclick="swReset()">Reset</button>
   </div>
-  <div class="stat">
-    <div class="stat-label">WiFi Signal</div>
-    <div class="wifi-row">
-      <div class="stat-value"><span id="rssi-val">—</span><span class="unit">dBm</span></div>
-      <span class="wifi-dots">
-        <span id="d1" style="height:5px"></span>
-        <span id="d2" style="height:8px"></span>
-        <span id="d3" style="height:12px"></span>
-        <span id="d4" style="height:16px"></span>
-      </span>
-    </div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">RAM</div>
-    <div class="ram-row">
-      <div class="stat-value" id="ram-txt">—</div>
-      <div class="ram-bar-wrap"><div class="ram-bar-fill" id="ram-bar" style="width:0%"></div></div>
-    </div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Requests Since Boot</div>
-    <div class="stat-value">
-      <div class="req-badge"><span class="req-dot"></span><span id="req-count">—</span></div>
-    </div>
-  </div>
+  <div class="sw-laps" id="sw-laps"></div>
 </div>
 
 <!-- Яркость -->
 <div class="card brightness-card">
-  <div class="brightness-header">
+  <div class="section-head">
     <div class="brightness-left">
-      <div class="brightness-title">Display Brightness</div>
+      <div class="section-title">Brightness</div>
       <span class="level-chip" id="bright-label">—</span>
     </div>
-    <div class="brightness-mode">
+    <div class="seg">
       <button class="mode-btn active" id="btn-auto"   onclick="setBrightnessMode('auto')">Auto</button>
       <button class="mode-btn"        id="btn-manual" onclick="setBrightnessMode('manual')">Manual</button>
     </div>
   </div>
   <div class="slider-row">
     <span class="brightness-icon">🌑</span>
-    <input type="range" id="brightness-slider"
-           min="0" max="100" value="50"
+    <input type="range" id="brightness-slider" min="0" max="100" value="50"
            class="disabled-slider"
-           oninput="onSliderInput(this.value)"
-           onchange="sendBrightness(this.value)">
+           oninput="onSliderInput(this.value)" onchange="sendBrightness(this.value)">
     <span class="brightness-icon">☀️</span>
     <span class="brightness-val"><span id="brightness-pct">—</span>%</span>
   </div>
@@ -434,24 +380,58 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
 </div>
 
-<!-- Секундомер -->
-<div class="card stopwatch-card">
-  <div class="stopwatch-header">
-    <div class="stopwatch-title">Stopwatch</div>
-    <span class="sw-sync" id="sw-sync">synced with device</span>
+<!-- Статистика -->
+<div class="card stats-card">
+  <div class="section-head"><div class="section-title">Device stats</div></div>
+  <div class="stat-grid">
+    <div class="tile">
+      <div class="tile-label">Die temp</div>
+      <div class="tile-value"><span id="temp">—</span><span class="unit">°C</span></div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">CPU load</div>
+      <div class="inline-row">
+        <div class="tile-value"><span id="cpu-val">—</span><span class="unit">%</span></div>
+        <div class="mini-bar"><div class="cpu-mini-fill" id="cpu-bar" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">WiFi SSID</div>
+      <div class="tile-value" id="ssid">—</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">IP address</div>
+      <div class="tile-value" id="ip">—</div>
+    </div>
+    <div class="tile wide">
+      <div class="tile-label">WiFi signal</div>
+      <div class="inline-row">
+        <div class="tile-value"><span id="rssi-val">—</span><span class="unit">dBm</span></div>
+        <span class="wifi-dots">
+          <span id="d1" style="height:5px"></span>
+          <span id="d2" style="height:8px"></span>
+          <span id="d3" style="height:12px"></span>
+          <span id="d4" style="height:16px"></span>
+        </span>
+      </div>
+    </div>
+    <div class="tile wide">
+      <div class="tile-label">RAM</div>
+      <div class="inline-row">
+        <div class="mini-bar"><div class="ram-bar-fill" id="ram-bar" style="width:0%"></div></div>
+      </div>
+      <div class="ram-sub" id="ram-txt">—</div>
+    </div>
+    <div class="tile wide">
+      <div class="tile-label">Requests since boot</div>
+      <div class="tile-value"><span class="req-badge"><span class="req-dot"></span><span id="req-count">—</span></span></div>
+    </div>
   </div>
-  <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
-  <div class="sw-controls">
-    <button class="sw-btn" id="sw-start-btn" onclick="swToggle()">Start</button>
-    <button class="sw-btn" id="sw-lap-btn"   onclick="swLap()"    disabled>Lap</button>
-    <button class="sw-btn" id="sw-reset-btn" onclick="swReset()">Reset</button>
-  </div>
-  <div class="sw-laps" id="sw-laps"></div>
 </div>
 
 <!-- curl -->
 <div class="card curl-card">
-  <div class="curl-label">API · curl examples</div>
+  <div class="section-head"><div class="section-title">API · curl</div></div>
   <div class="curl-row">
     <code class="curl-line" id="curl-time">curl http://&lt;IP&gt;/api/time</code>
     <button class="curl-copy" onclick="copyCmd('curl-time',this)">copy</button>
@@ -468,53 +448,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <code class="curl-line" id="curl-power">curl -X POST http://&lt;IP&gt;/api/power -d "on=0"</code>
     <button class="curl-copy" onclick="copyCmd('curl-power',this)">copy</button>
   </div>
-  <div class="curl-line curl-note"># brightness auto: -d "auto=1" &nbsp;|&nbsp; power on: -d "on=1"</div>
+  <div class="curl-note"># brightness auto: -d "auto=1" &nbsp;|&nbsp; power on: -d "on=1"</div>
 </div>
 
 <!-- Chip info -->
 <div class="card chip-card">
-  <div class="chip-label">Microcontroller · ESP32-C3 Super Mini</div>
+  <div class="section-head"><div class="section-title">Microcontroller · ESP32-C3 Super Mini</div></div>
   <div class="chip-grid">
-    <div class="chip-item">
-      <span class="chip-key">Architecture</span>
-      <span class="chip-val">RISC-V 32-bit</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">Core / Freq</span>
-      <span class="chip-val">1× up to 160 MHz</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">Flash</span>
-      <span class="chip-val">4 MB</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">SRAM</span>
-      <span class="chip-val">400 KB</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">WiFi</span>
-      <span class="chip-val">802.11 b/g/n 2.4 GHz</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">Bluetooth</span>
-      <span class="chip-val">BLE 5.0</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">Display</span>
-      <span class="chip-val">SSD1322 256×64 SPI</span>
-    </div>
-    <div class="chip-item">
-      <span class="chip-key">Protocol</span>
-      <span class="chip-val">REST + WebSocket :81</span>
-    </div>
+    <div class="chip-item"><span class="chip-key">Architecture</span><span class="chip-val">RISC-V 32-bit</span></div>
+    <div class="chip-item"><span class="chip-key">Core / Freq</span><span class="chip-val">1x up to 160 MHz</span></div>
+    <div class="chip-item"><span class="chip-key">Flash</span><span class="chip-val">4 MB</span></div>
+    <div class="chip-item"><span class="chip-key">SRAM</span><span class="chip-val">400 KB</span></div>
+    <div class="chip-item"><span class="chip-key">WiFi</span><span class="chip-val">802.11 b/g/n 2.4 GHz</span></div>
+    <div class="chip-item"><span class="chip-key">Bluetooth</span><span class="chip-val">BLE 5.0</span></div>
+    <div class="chip-item"><span class="chip-key">Display</span><span class="chip-val">SSD1322 256x64 SPI</span></div>
+    <div class="chip-item"><span class="chip-key">Protocol</span><span class="chip-val">REST + WebSocket :81</span></div>
   </div>
 </div>
 
 <div class="status-bar">
-  <span class="ws-indicator">
-    <span class="ws-dot" id="ws-dot"></span>
-    <span id="ws-label">CONNECTING</span>
-  </span>
+  <span class="ws-indicator"><span class="ws-dot" id="ws-dot"></span><span id="ws-label">CONNECTING</span></span>
 </div>
 <div class="toast" id="toast"></div>
 

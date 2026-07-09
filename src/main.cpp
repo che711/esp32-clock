@@ -6,10 +6,11 @@
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
+#include "esp_freertos_hooks.h"
 #include "web_ui.h"
 #include "clock_utils.h"
 
-const char* WIFI_SSID = "network";
+const char* WIFI_SSID = "SkyNet";
 const char* WIFI_PASS = "password";
 
 const char* HOSTNAME   = "clock";           // → http://clock.local
@@ -48,7 +49,15 @@ bool timeSynced   = false;
 String localIP    = "";
 
 static uint32_t requestCount     = 0;
-static float    cpuLoadPct       = 0.0f;
+
+// ─── Реальная загрузка CPU через idle-hook ────────────────
+// idle-hook вызывается, когда ядро простаивает. Считаем инкременты за
+// окно 1 с и сравниваем с максимумом (≈100% простоя) — self-calibration.
+static volatile uint32_t idleCount = 0;
+static uint32_t idleMax    = 1;
+static uint8_t  cpuLoadPct = 0;
+static bool idleHook() { idleCount++; return true; }
+
 static bool     displayOn        = true;
 static uint8_t  currentContrast  = 255;
 static bool     manualBrightness = false;
@@ -66,7 +75,21 @@ uint32_t swElapsed() {
     return swAccumMs;
 }
 
-uint8_t getCpuLoad() { return (uint8_t)constrain(cpuLoadPct, 0.0f, 99.0f); }
+uint8_t getCpuLoad() { return cpuLoadPct; }
+
+// Обновление загрузки: окно 1 с, load = 100 * (1 - idle/idleMax)
+void updateCpuLoad() {
+    static uint32_t lastWin = 0;
+    uint32_t now = millis();
+    if (now - lastWin < 1000) return;
+    lastWin = now;
+    uint32_t c = idleCount;
+    idleCount = 0;
+    if (c > idleMax) idleMax = c;                       // калибровка «100% простоя»
+    if (idleMax < 1000) return;                         // idle-hook ещё не считает — не портим показания
+    uint32_t used = (uint32_t)((uint64_t)c * 100 / idleMax);
+    cpuLoadPct = (uint8_t)(used > 100 ? 0 : 100 - used);
+}
 
 // ─── Дисплей вкл/выкл ────────────────────────────────────
 void setDisplayPower(bool on) {
@@ -107,6 +130,8 @@ String getUptime() {
 
 // ─── JSON ─────────────────────────────────────────────────
 void buildJson(char* buf, size_t sz) {
+    char uptimeBuf[32];
+    formatUptime(millis() / 1000, uptimeBuf, sizeof(uptimeBuf));
     snprintf(buf, sz,
         "{"
         "\"time\":\"%s\","
@@ -129,7 +154,7 @@ void buildJson(char* buf, size_t sz) {
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
-        getUptime().c_str(),
+        uptimeBuf,
         WIFI_SSID, localIP.c_str(),
         (int)WiFi.RSSI(),
         (float)temperatureRead(),
@@ -147,6 +172,7 @@ void buildJson(char* buf, size_t sz) {
 }
 
 void broadcastState() {
+    if (webSocket.connectedClients() == 0) return;  // некому слать — не тратим CPU
     char json[768];
     buildJson(json, sizeof(json));
     webSocket.broadcastTXT(json);
@@ -275,6 +301,8 @@ void connectWifi() {
     Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(HOSTNAME);
+    WiFi.setAutoReconnect(true);
+    WiFi.setSleep(true);           // modem-sleep: радио спит между маячками — меньше нагрев
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     uint8_t tries = 0;
     while (WiFi.status() != WL_CONNECTED && tries < 30) {
@@ -305,6 +333,29 @@ void syncNTP() {
     }
     timeSynced = (tries < 20);
     Serial.println(timeSynced ? " OK" : " TIMEOUT");
+}
+
+// ─── Поддержание сети: реконнект + периодический ре-синк NTP ──
+void maintainNetwork() {
+    static uint32_t lastCheck = 0;
+    static uint32_t lastNtp   = 0;
+    uint32_t now = millis();
+
+    if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
+        lastCheck = now;
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("WiFi lost -> reconnect");
+            WiFi.reconnect();
+        } else {
+            String ip = WiFi.localIP().toString();
+            if (ip != localIP) localIP = ip;  // IP мог смениться при реконнекте
+        }
+    }
+    if (timeSynced && now - lastNtp >= 6UL * 3600UL * 1000UL) {  // ре-синк раз в 6 ч
+        lastNtp = now;
+        configTzTime(TZ_INFO, NTP_SERVER);
+        Serial.println("NTP resync");
+    }
 }
 
 // ─── Буферы времени ───────────────────────────────────────
@@ -410,6 +461,13 @@ void setup() {
 
     Serial.println("\n=== ESP32-C3 Clock boot ===");
 
+    // 80 МГц вместо 160: для часов + веб-сервера хватает с запасом,
+    // а нагрев кристалла и потребление заметно ниже. 80 — минимум для WiFi.
+    setCpuFrequencyMhz(80);
+    Serial.printf("CPU @ %u MHz\n", getCpuFrequencyMhz());
+
+    esp_register_freertos_idle_hook(idleHook);   // реальная загрузка CPU
+
     u8g2.begin();
     u8g2.setContrast(currentContrast);
     u8g2.clearBuffer();
@@ -436,10 +494,9 @@ void setup() {
 }
 
 void loop() {
-    uint32_t t0 = micros();
-
     server.handleClient();
     webSocket.loop();
+    maintainNetwork();
     updateTimeStrings();
 
     if (swState == SW_RUNNING) {
@@ -466,18 +523,15 @@ void loop() {
     static uint32_t lastHb = 0;
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
-        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u\n",
+        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u load=%u%%\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
                       (int)WiFi.RSSI(),
-                      (unsigned)esp_get_free_heap_size());
+                      (unsigned)esp_get_free_heap_size(),
+                      cpuLoadPct);
     }
 
-    // Оценка загрузки: доля времени работы в цикле ~100 мс (сглаживание EMA)
-    uint32_t workUs = micros() - t0;
-    float sample = (float)workUs / 1000.0f;   // мс работы в цикле == ~% при цикле 100 мс
-    cpuLoadPct = cpuLoadPct * 0.88f + sample * 0.12f;
-
+    updateCpuLoad();
     delay(100);
 }
