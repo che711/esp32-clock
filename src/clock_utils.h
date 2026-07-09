@@ -3,6 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
+// ─── Единая шкала контраста ───────────────────────────────
+// SSD1322 принимает контраст 0..255. Держим одну константу,
+// чтобы проценты в UI, ручная установка и авто-яркость
+// считались по одной и той же шкале (раньше было 200 и 255).
+static const uint8_t CONTRAST_MAX = 255;
+
 // ─── Uptime ───────────────────────────────────────────────
 inline void formatUptime(uint32_t totalSeconds, char* buf, size_t sz) {
     uint32_t s = totalSeconds;
@@ -28,8 +34,16 @@ inline BrightnessLevel brightnessForHour(int hour) {
     return                              { 120, "Evening" };
 }
 
+// contrast(0..255) → проценты(0..100)
 inline uint8_t brightnessPct(uint8_t contrast) {
-    return (uint8_t)((uint32_t)contrast * 100 / 200);
+    return (uint8_t)((uint32_t)contrast * 100 / CONTRAST_MAX);
+}
+
+// проценты(0..100) → contrast(0..255)
+inline uint8_t pctToContrast(int pct) {
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    return (uint8_t)((uint32_t)pct * CONTRAST_MAX / 100);
 }
 
 // ─── Форматирование времени ───────────────────────────────
@@ -40,6 +54,16 @@ inline void formatTime(int h, int m, int s, char* buf, size_t sz) {
 inline void formatDate(int day, const char* month, int year,
                         char* buf, size_t sz) {
     snprintf(buf, sz, "%02d %s %04d", day, month, year);
+}
+
+// ─── Форматирование секундомера ───────────────────────────
+// Общая логика MM:SS.mmm, чтобы её можно было покрыть тестом.
+inline void formatStopwatch(uint32_t ms, char* buf, size_t sz) {
+    uint32_t mins   = (ms / 60000) % 100;   // до 99 минут
+    uint32_t secs   = (ms / 1000)  % 60;
+    uint32_t millis = ms % 1000;
+    snprintf(buf, sz, "%02u:%02u.%03u",
+             (unsigned)mins, (unsigned)secs, (unsigned)millis);
 }
 
 // ─── Валидация JSON-поля ──────────────────────────────────

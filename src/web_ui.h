@@ -6,56 +6,92 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ESP32 Clock</title>
+<title>ESP32 Clock</title>sudo dmesg | grep tty
+[sudo] password for andrew: 
+[    0.177606] printk: legacy console [tty0] enabled
+[    3.747882] cdc_acm 1-2:1.0: ttyACM0: USB ACM device
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
   :root {
-    --bg:          #0f2a5c;
-    --card:        #0a1f47;
-    --border:      #1a3a70;
-    --text:        #cfe0ff;
-    --text-dim:    #4d7ec4;
-    --text-faint:  #2a4e8a;
-    --accent:      #4d8ef0;
-    --curl-bg:     #060e20;
-    --curl-border: #132845;
-    --btn-bg:      #1a2e5c;
-    --btn-color:   #7ab0ff;
-    --wifi-off:    #1a3a70;
-    --slider-bg:   #0a1525;
+    --bg:          #0a1e46;
+    --bg-2:        #0d2352;
+    --card:        #0c214c;
+    --card-hi:     rgba(122,176,255,0.06);
+    --border:      #1c3d76;
+    --text:        #dbe8ff;
+    --text-dim:    #6c9bda;
+    --text-faint:  #33578f;
+    --accent:      #5b9bff;
+    --accent-soft: rgba(91,155,255,0.16);
+    --curl-bg:     #050c1c;
+    --curl-border: #122542;
+    --btn-bg:      #16295380;
+    --btn-color:   #8dbaff;
+    --wifi-off:    #1c3d76;
+    --slider-bg:   #071223;
+    --shadow:      0 10px 30px rgba(0,0,0,0.35);
   }
 
   [data-theme="light"] {
-    --bg:          #dce8ff;
-    --card:        #eef4ff;
-    --border:      #a0c0f0;
+    --bg:          #e5eeff;
+    --bg-2:        #d7e5ff;
+    --card:        #f4f8ff;
+    --card-hi:     rgba(255,255,255,0.7);
+    --border:      #b2ccf0;
     --text:        #0a1f47;
-    --text-dim:    #2a5298;
-    --text-faint:  #5b8fd4;
-    --accent:      #1a5fc8;
-    --curl-bg:     #e0ecff;
-    --curl-border: #a0c0f0;
-    --btn-bg:      #d0e4ff;
-    --btn-color:   #1a3a8a;
-    --wifi-off:    #b0c8f0;
-    --slider-bg:   #c0d4f0;
+    --text-dim:    #2a5db0;
+    --text-faint:  #6b95d4;
+    --accent:      #1f66d6;
+    --accent-soft: rgba(31,102,214,0.12);
+    --curl-bg:     #e6efff;
+    --curl-border: #b2ccf0;
+    --btn-bg:      #dbe9ff;
+    --btn-color:   #1a3f92;
+    --wifi-off:    #bcd2f2;
+    --slider-bg:   #cdddf6;
+    --shadow:      0 8px 24px rgba(31,66,132,0.14);
   }
 
   body {
-    background: var(--bg); color: var(--text);
+    background:
+      radial-gradient(1200px 600px at 50% -10%, var(--bg-2), transparent 60%),
+      var(--bg);
+    color: var(--text);
     font-family: 'Inter', system-ui, sans-serif;
     min-height: 100vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    padding: 28px 16px; gap: 12px;
+    align-items: center; justify-content: flex-start;
+    padding: 22px 16px 40px; gap: 12px;
     transition: background 0.3s, color 0.3s;
   }
 
   .card {
-    background: var(--card); border: 1px solid var(--border);
+    background:
+      linear-gradient(var(--card-hi), transparent 42%),
+      var(--card);
+    border: 1px solid var(--border);
     border-radius: 18px; width: min(540px, 100%);
+    box-shadow: var(--shadow);
     transition: background 0.3s, border-color 0.3s;
+  }
+
+  /* ── Шапка ── */
+  .app-header {
+    width: min(540px, 100%);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 4px 4px;
+  }
+  .app-title {
+    font-size: 13px; font-weight: 700; letter-spacing: 4px;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .app-title b { color: var(--accent); font-weight: 700; }
+  .host-chip {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-dim); background: var(--accent-soft);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 11px; letter-spacing: 0.5px;
   }
 
   .theme-btn {
@@ -64,18 +100,30 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     background: var(--card); border: 1px solid var(--border);
     color: var(--text-dim); font-size: 18px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    z-index: 50; transition: background 0.2s, border-color 0.2s;
+    z-index: 50; box-shadow: var(--shadow);
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
   }
-  .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .theme-btn:hover { border-color: var(--accent); color: var(--accent); transform: rotate(-12deg); }
 
   /* ── Часы ── */
-  .clock-card { padding: 30px 24px 24px; text-align: center; overflow: hidden; }
+  .clock-card { padding: 30px 24px 22px; text-align: center; overflow: hidden; }
   #time {
     font-family: 'JetBrains Mono', monospace;
     font-size: clamp(44px, 10vw, 82px); font-weight: 700;
     letter-spacing: -1px; line-height: 1; color: var(--text); white-space: nowrap;
   }
-  .divider { border: none; border-top: 1px solid var(--border); margin: 18px 0 14px; }
+  /* Сигнатурный элемент: полоса прогресса секунд */
+  .sec-track {
+    height: 3px; border-radius: 3px; background: var(--slider-bg);
+    margin: 20px auto 0; overflow: hidden; max-width: 320px;
+  }
+  #sec-bar {
+    height: 100%; width: 0%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), #9ec5ff);
+    box-shadow: 0 0 8px var(--accent-soft);
+    transition: width 0.9s linear;
+  }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0 14px; }
   #date { font-size: clamp(15px, 3.5vw, 20px); font-weight: 600; color: var(--text-dim); letter-spacing: 3px; text-transform: uppercase; }
   #day  { font-size: clamp(12px, 2.5vw, 15px); font-weight: 500; color: var(--text-faint); letter-spacing: 5px; margin-top: 5px; text-transform: uppercase; }
 
@@ -93,7 +141,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   .wifi-row  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .wifi-dots { display: inline-flex; gap: 3px; align-items: flex-end; }
-  .wifi-dots span { display: inline-block; width: 6px; border-radius: 2px; background: var(--wifi-off); }
+  .wifi-dots span { display: inline-block; width: 6px; border-radius: 2px; background: var(--wifi-off); transition: background 0.3s; }
   .wifi-dots span.on { background: var(--accent); }
 
   .cpu-row       { display: flex; align-items: center; gap: 10px; }
@@ -105,7 +153,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   /* ── Яркость ── */
   .brightness-card { padding: 20px 24px; }
   .brightness-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .brightness-left { display: flex; align-items: center; gap: 10px; }
   .brightness-title  { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
+  .level-chip {
+    font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft);
+    border-radius: 999px; padding: 3px 9px;
+  }
   .brightness-mode   { display: flex; gap: 6px; }
 
   .mode-btn {
@@ -129,7 +183,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   input[type="range"] {
     -webkit-appearance: none; appearance: none;
     flex: 1; height: 6px; border-radius: 3px; outline: none;
-    background: linear-gradient(var(--accent), var(--accent)) 0/78% 100% no-repeat,
+    background: linear-gradient(var(--accent), var(--accent)) 0/50% 100% no-repeat,
                 var(--slider-bg);
     cursor: pointer; transition: opacity 0.2s;
   }
@@ -193,7 +247,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
     background: var(--card); border: 1px solid var(--border);
     color: var(--text); font-size: 14px; font-weight: 500;
-    padding: 12px 24px; border-radius: 10px;
+    padding: 12px 24px; border-radius: 10px; box-shadow: var(--shadow);
     opacity: 0; transition: opacity 0.3s;
     pointer-events: none; white-space: nowrap; z-index: 100;
   }
@@ -224,6 +278,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .stopwatch-card { padding: 22px 24px; }
   .stopwatch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
   .stopwatch-title { font-size: 11px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
+  .sw-sync { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); }
   .sw-display {
     font-family: 'JetBrains Mono', monospace;
     font-size: clamp(32px, 7vw, 56px); font-weight: 700;
@@ -240,12 +295,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     min-width: 90px;
   }
+  .sw-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   #sw-start-btn { border-color: #16a34a; color: #16a34a; }
   #sw-start-btn:hover { background: #16a34a; color: #fff; }
   #sw-start-btn.running { border-color: #d97706; color: #d97706; }
   #sw-start-btn.running:hover { background: #d97706; color: #fff; }
   #sw-reset-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #sw-lap-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #sw-lap-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .sw-laps { margin-top: 14px; max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
   .sw-lap-item {
     display: flex; align-items: center; justify-content: space-between;
@@ -265,15 +321,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .chip-item { display: flex; flex-direction: column; gap: 2px; }
   .chip-key  { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; }
   .chip-val  { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
 
 <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
 
+<!-- Шапка -->
+<div class="app-header">
+  <div class="app-title">ESP32 <b>CLOCK</b></div>
+  <div class="host-chip" id="host-chip">clock.local</div>
+</div>
+
 <!-- Часы -->
 <div class="card clock-card">
   <div id="time">--:--:--</div>
+  <div class="sec-track"><div id="sec-bar"></div></div>
   <hr class="divider">
   <div id="date">-- --- ----</div>
   <div id="day">---------</div>
@@ -334,7 +401,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!-- Яркость -->
 <div class="card brightness-card">
   <div class="brightness-header">
-    <div class="brightness-title">Display Brightness</div>
+    <div class="brightness-left">
+      <div class="brightness-title">Display Brightness</div>
+      <span class="level-chip" id="bright-label">—</span>
+    </div>
     <div class="brightness-mode">
       <button class="mode-btn active" id="btn-auto"   onclick="setBrightnessMode('auto')">Auto</button>
       <button class="mode-btn"        id="btn-manual" onclick="setBrightnessMode('manual')">Manual</button>
@@ -343,7 +413,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="slider-row">
     <span class="brightness-icon">🌑</span>
     <input type="range" id="brightness-slider"
-           min="0" max="100" value="78"
+           min="0" max="100" value="50"
            class="disabled-slider"
            oninput="onSliderInput(this.value)"
            onchange="sendBrightness(this.value)">
@@ -368,6 +438,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <div class="card stopwatch-card">
   <div class="stopwatch-header">
     <div class="stopwatch-title">Stopwatch</div>
+    <span class="sw-sync" id="sw-sync">synced with device</span>
   </div>
   <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
   <div class="sw-controls">
@@ -460,6 +531,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     localStorage.setItem('theme', next);
   }
 
+  // Показываем реальный хост в чипе (clock.local или IP)
+  document.getElementById('host-chip').textContent = location.hostname || 'clock.local';
+
   // ── Состояние ────────────────────────────────────────
   let isManual          = false;
   let isDisplayOn       = true;
@@ -474,13 +548,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   slider.addEventListener('touchend',   () => { isDragging = false; });
 
   // ── Слайдер ──────────────────────────────────────────
-  function onSliderInput(val) {
-    val = parseInt(val);
+  function paintSlider(val) {
     slider.style.background =
       'linear-gradient(var(--accent), var(--accent)) 0/' + val + '% 100% no-repeat, var(--slider-bg)';
+  }
+  function onSliderInput(val) {
+    val = parseInt(val);
+    paintSlider(val);
     document.getElementById('brightness-pct').textContent = val;
   }
-
   function sendBrightness(val) {
     fetch('/api/brightness', {
       method: 'POST',
@@ -492,18 +568,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   // ── Режим яркости ────────────────────────────────────
   function setBrightnessMode(mode) {
     const manual = (mode === 'manual');
-
-    // Если кнопка уже активна — ничего не делаем
     if (manual === isManual) return;
 
     isManual = manual;
     modeChangePending = true;
     _applyModeUI(manual);
 
-    const body = manual
-      ? 'value=' + slider.value
-      : 'auto=1';
-
+    const body = manual ? 'value=' + slider.value : 'auto=1';
     fetch('/api/brightness', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -519,11 +590,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function _applyModeUI(manual) {
     const btnAuto   = document.getElementById('btn-auto');
     const btnManual = document.getElementById('btn-manual');
-
-    // Убираем active с обеих, потом ставим нужной
     btnAuto.classList.remove('active');
     btnManual.classList.remove('active');
-
     if (manual) {
       btnManual.classList.add('active');
       slider.classList.remove('disabled-slider');
@@ -555,6 +623,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   // ── WebSocket ─────────────────────────────────────────
   let ws, wsReconnectTimer;
   function wsConnect() {
+    swServerSynced = false;              // при новом коннекте заново берём состояние секундомера с устройства
     ws = new WebSocket('ws://' + location.hostname + ':81/');
     ws.onopen    = () => { setWsStatus(true);  clearTimeout(wsReconnectTimer); };
     ws.onmessage = (e) => { try { updateUI(JSON.parse(e.data)); } catch(_) {} };
@@ -564,6 +633,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function setWsStatus(ok) {
     document.getElementById('ws-dot').className    = 'ws-dot ' + (ok ? 'connected' : 'disconnected');
     document.getElementById('ws-label').textContent = ok ? 'LIVE' : 'OFFLINE';
+  }
+
+  // ── Полоса секунд ─────────────────────────────────────
+  let lastSecPct = 0;
+  function updateSecBar(timeStr) {
+    const parts = (timeStr || '').split(':');
+    if (parts.length !== 3) return;
+    const sec = parseInt(parts[2], 10);
+    if (isNaN(sec)) return;
+    const pct = (sec / 60) * 100;
+    const bar = document.getElementById('sec-bar');
+    // при переходе на новую минуту не анимируем «назад»
+    if (pct < lastSecPct) { bar.style.transition = 'none'; bar.style.width = pct + '%';
+                            void bar.offsetWidth; bar.style.transition = ''; }
+    else                  { bar.style.width = pct + '%'; }
+    lastSecPct = pct;
   }
 
   // ── UI update ─────────────────────────────────────────
@@ -577,22 +662,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('temp').textContent         = d.temp;
     document.getElementById('rssi-val').textContent     = d.rssi;
     document.getElementById('cpu-val').textContent      = d.cpu;
-    document.getElementById('req-count').textContent    = d.requests.toLocaleString();
+    document.getElementById('req-count').textContent    = Number(d.requests).toLocaleString();
+    document.getElementById('bright-label').textContent = d.brightness_label;
+
+    updateSecBar(d.time);
+
+    // curl-примеры под реальный IP
     document.getElementById('curl-time')  .textContent = 'curl http://' + d.ip + '/api/time';
     document.getElementById('curl-stats') .textContent = 'curl http://' + d.ip + '/api/stats';
     document.getElementById('curl-bright').textContent = 'curl -X POST http://' + d.ip + '/api/brightness -d "value=80"';
     document.getElementById('curl-power') .textContent = 'curl -X POST http://' + d.ip + '/api/power -d "on=0"';
 
-    // Слайдер — не трогаем пока пользователь его двигает или есть pending-запрос
+    // Слайдер — не трогаем, пока пользователь двигает или есть pending-запрос
     if (!isDragging && !modeChangePending && !isManual) {
       const pct = d.brightness_pct;
       slider.value = pct;
-      slider.style.background =
-        'linear-gradient(var(--accent), var(--accent)) 0/' + pct + '% 100% no-repeat, var(--slider-bg)';
+      paintSlider(pct);
       document.getElementById('brightness-pct').textContent = pct;
     }
 
-    // Режим — синхронизируем только если нет pending-запроса
+    // Режим яркости
     if (!modeChangePending) {
       const serverManual = (d.brightness_manual === true);
       if (serverManual !== isManual) {
@@ -602,32 +691,36 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
 
     // Питание
-    if (d.display_on !== isDisplayOn) {
-      _applyPowerUI(d.display_on);
-    }
+    if (d.display_on !== isDisplayOn) _applyPowerUI(d.display_on);
 
     // CPU
     const cpuEl = document.getElementById('cpu-bar');
     cpuEl.style.width = d.cpu + '%';
     cpuEl.className = 'cpu-mini-fill' + (d.cpu > 80 ? ' crit' : d.cpu > 50 ? ' warn' : '');
 
-    // WiFi dots
+    // WiFi
     const lvl = d.rssi >= -50 ? 4 : d.rssi >= -60 ? 3 : d.rssi >= -70 ? 2 : 1;
     for (let i = 1; i <= 4; i++)
       document.getElementById('d' + i).className = i <= lvl ? 'on' : '';
 
     // RAM
     const used = d.ram_total - d.ram_free;
-    const pct  = Math.round(used * 100 / d.ram_total);
+    const rpct = Math.round(used * 100 / d.ram_total);
     document.getElementById('ram-txt').textContent =
       Math.round(d.ram_free / 1024) + ' KB free  ·  ' +
-      Math.round(d.ram_total / 1024) + ' KB total  ·  ' + pct + '% used';
+      Math.round(d.ram_total / 1024) + ' KB total  ·  ' + rpct + '% used';
     const ramBar = document.getElementById('ram-bar');
-    ramBar.style.width = pct + '%';
-    ramBar.className = 'ram-bar-fill' + (pct > 80 ? ' crit' : pct > 60 ? ' warn' : '');
+    ramBar.style.width = rpct + '%';
+    ramBar.className = 'ram-bar-fill' + (rpct > 80 ? ' crit' : rpct > 60 ? ' warn' : '');
+
+    // Секундомер — берём состояние с устройства при первом сообщении/реконнекте
+    if (!swServerSynced && d.sw_state !== undefined) {
+      adoptStopwatch(d.sw_state, d.sw_ms);
+      swServerSynced = true;
+    }
   }
 
-  // ── Reboot ────────────────────────────────────────────
+  // ── Toast / Reboot ────────────────────────────────────
   function showToast(msg, ms) {
     ms = ms || 2500;
     const t = document.getElementById('toast');
@@ -650,24 +743,61 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
 
   // ── Секундомер ───────────────────────────────────────
-  let swRunning    = false;
-  let swStartTs    = 0;
-  let swAccum      = 0;
-  let swRafId      = null;
-  let swLaps       = [];
-  let swLastLapMs  = 0;
+  let swRunning     = false;
+  let swStartTs     = 0;
+  let swAccum       = 0;
+  let swRafId       = null;
+  let swLaps        = [];
+  let swLastLapMs   = 0;
+  let swServerSynced = false;
 
   function swSend(cmd) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
   }
 
+  // Приводим локальный секундомер к состоянию устройства (state: 0=idle,1=run,2=pause)
+  function adoptStopwatch(state, ms) {
+    cancelAnimationFrame(swRafId);
+    swLaps = []; swLastLapMs = 0;
+    document.getElementById('sw-laps').innerHTML = '';
+    const startBtn = document.getElementById('sw-start-btn');
+    const lapBtn   = document.getElementById('sw-lap-btn');
+
+    if (state === 1) {                 // RUNNING
+      swRunning = true;
+      swAccum   = ms;
+      swStartTs = performance.now();
+      startBtn.textContent = 'Pause';
+      startBtn.classList.add('running');
+      lapBtn.disabled = false;
+      swTick();
+    } else if (state === 2) {          // PAUSED
+      swRunning = false;
+      swAccum   = ms;
+      swStartTs = 0;
+      swRender(ms);
+      startBtn.textContent = 'Resume';
+      startBtn.classList.remove('running');
+      lapBtn.disabled = (ms <= 0);
+    } else {                           // IDLE
+      swRunning = false;
+      swAccum   = 0;
+      swStartTs = 0;
+      swRender(0);
+      startBtn.textContent = 'Start';
+      startBtn.classList.remove('running');
+      lapBtn.disabled = true;
+    }
+  }
+
   function swToggle() {
+    const startBtn = document.getElementById('sw-start-btn');
     if (!swRunning) {
       swRunning = true;
       swStartTs = performance.now();
       swSend('sw:start');
-      document.getElementById('sw-start-btn').textContent = 'Pause';
-      document.getElementById('sw-start-btn').classList.add('running');
+      startBtn.textContent = 'Pause';
+      startBtn.classList.add('running');
       document.getElementById('sw-lap-btn').disabled = false;
       swTick();
     } else {
@@ -675,13 +805,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       swAccum  += performance.now() - swStartTs;
       cancelAnimationFrame(swRafId);
       swSend('sw:pause');
-      document.getElementById('sw-start-btn').textContent = 'Resume';
-      document.getElementById('sw-start-btn').classList.remove('running');
+      startBtn.textContent = 'Resume';
+      startBtn.classList.remove('running');
     }
   }
 
   function swTick() {
-    const now    = swAccum + (performance.now() - swStartTs);
+    const now = swAccum + (performance.now() - swStartTs);
     swRender(now);
     if (swRunning) swRafId = requestAnimationFrame(swTick);
   }
@@ -691,11 +821,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const mins    = Math.floor(totalMs / 60000);
     const secs    = Math.floor((totalMs % 60000) / 1000);
     const millis  = totalMs % 1000;
-    const mm = String(mins).padStart(2, '0');
-    const ss = String(secs).padStart(2, '0');
-    const ms3 = String(millis).padStart(3, '0');
     document.getElementById('sw-display').innerHTML =
-      mm + ':' + ss + '<span class="sw-ms">.' + ms3 + '</span>';
+      String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') +
+      '<span class="sw-ms">.' + String(millis).padStart(3,'0') + '</span>';
   }
 
   function swLap() {
@@ -704,11 +832,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     swLastLapMs = now;
     swLaps.push({ total: now, delta: delta });
     const container = document.getElementById('sw-laps');
-    const n   = swLaps.length;
     const row = document.createElement('div');
     row.className = 'sw-lap-item';
     row.innerHTML =
-      '<span class="sw-lap-num">Lap ' + n + '</span>' +
+      '<span class="sw-lap-num">Lap ' + swLaps.length + '</span>' +
       '<span class="sw-lap-time">' + swFmt(now) + '</span>' +
       '<span class="sw-lap-delta">+' + swFmt(delta) + '</span>';
     container.prepend(row);
@@ -742,13 +869,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   // ── Copy curl ─────────────────────────────────────────
   function copyCmd(id, btn) {
     const text = document.getElementById(id).textContent.trim();
-
     function done() {
       btn.textContent = '✓ copied';
       btn.classList.add('copied');
       setTimeout(function() { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1800);
     }
-
     function fallback() {
       const ta = document.createElement('textarea');
       ta.value = text;
@@ -759,7 +884,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       try { if (document.execCommand('copy')) done(); } catch(e) {}
       document.body.removeChild(ta);
     }
-
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done).catch(fallback);
     } else {
