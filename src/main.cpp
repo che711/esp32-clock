@@ -3,10 +3,10 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <ESPmDNS.h>
+#include <esp_wifi.h>
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
-#include "esp_freertos_hooks.h"
 #include "web_ui.h"
 #include "clock_utils.h"
 
@@ -30,6 +30,10 @@ const char* TZ_INFO = "CET-1CEST,M3.5.0,M10.5.0/3";
 #define PIN_DC   1
 #define PIN_RST  3
 
+// Пока OLED не подпаян — поставь 0: уберёт слепой битбанг 8 КБ/с по SW-SPI
+// (u8g2 не знает, что панели нет, и шлёт кадры впустую, грея ядро).
+#define HAS_DISPLAY 1
+
 U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI
     u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
 
@@ -49,16 +53,6 @@ bool timeSynced   = false;
 String localIP    = "";
 
 static uint32_t requestCount     = 0;
-
-// ─── Усреднённая загрузка CPU (idle-hook + EMA) ───────────
-// idle-hook тикает в простое; за окно 1 с считаем мгновенную загрузку
-// относительно калибровочного максимума и сглаживаем EMA (~7 c),
-// чтобы убрать всплески от фоновых задач WiFi/TCP.
-static volatile uint32_t idleCount = 0;
-static uint32_t idleMax    = 1;
-static float    loadAvg    = 0.0f;
-static bool idleHook() { idleCount++; return true; }
-
 static bool     displayOn        = true;
 static uint8_t  currentContrast  = 255;
 static bool     manualBrightness = false;
@@ -89,32 +83,17 @@ float getDieTemp() {
     return cached;
 }
 
-uint8_t getCpuLoad() { return (uint8_t)(loadAvg + 0.5f); }
-
-// Обновление загрузки раз в секунду + EMA-сглаживание.
-void updateCpuLoad() {
-    static uint32_t lastWin = 0;
-    uint32_t now = millis();
-    if (now - lastWin < 1000) return;
-    lastWin = now;
-    uint32_t c = idleCount;
-    idleCount = 0;
-    if (c > idleMax) idleMax = c;                 // калибровка «100% простоя» (потолок — не переоценить)
-    if (idleMax < 1000) return;                   // idle-hook ещё не считает — ждём калибровки
-    uint32_t used = (uint32_t)((uint64_t)c * 100 / idleMax);
-    float inst = (used > 100) ? 0.0f : (float)(100 - used);
-    loadAvg = loadAvg * 0.85f + inst * 0.15f;     // EMA, τ≈7 c
-}
-
 // ─── Дисплей вкл/выкл ────────────────────────────────────
 void setDisplayPower(bool on) {
     displayOn = on;
+#if HAS_DISPLAY
     if (on) {
         u8g2.setPowerSave(0);
         u8g2.setContrast(currentContrast);
     } else {
         u8g2.setPowerSave(1);
     }
+#endif
     Serial.printf("Display -> %s\n", on ? "ON" : "OFF");
 }
 
@@ -122,7 +101,9 @@ void setDisplayPower(bool on) {
 void applyContrast(uint8_t val, const char* label) {
     currentContrast = val;
     brightnessLabel = label;
+#if HAS_DISPLAY
     if (displayOn) u8g2.setContrast(currentContrast);
+#endif
 }
 
 void updateBrightness() {
@@ -134,13 +115,6 @@ void updateBrightness() {
         applyContrast(b.contrast, b.label);
         Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentContrast);
     }
-}
-
-// ─── Uptime ───────────────────────────────────────────────
-String getUptime() {
-    char buf[32];
-    formatUptime(millis() / 1000, buf, sizeof(buf));
-    return String(buf);
 }
 
 // ─── JSON ─────────────────────────────────────────────────
@@ -157,7 +131,7 @@ void buildJson(char* buf, size_t sz) {
         "\"ip\":\"%s\","
         "\"rssi\":%d,"
         "\"temp\":\"%.1f\","
-        "\"cpu\":%d,"
+        "\"clients\":%d,"
         "\"ram_free\":%lu,"
         "\"ram_total\":%lu,"
         "\"brightness_pct\":%d,"
@@ -173,7 +147,7 @@ void buildJson(char* buf, size_t sz) {
         WIFI_SSID, localIP.c_str(),
         (int)WiFi.RSSI(),
         (float)getDieTemp(),
-        getCpuLoad(),
+        (int)webSocket.connectedClients(),
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)ESP.getHeapSize(),
         brightnessPct(currentContrast),
@@ -208,12 +182,14 @@ void handleApiStats() {
 
 void handleApiTime() {
     requestCount++;
+    char uptimeBuf[32];
+    formatUptime(millis() / 1000, uptimeBuf, sizeof(uptimeBuf));
     char json[256];
     snprintf(json, sizeof(json),
         "{\"time\":\"%s\",\"date\":\"%s\",\"day\":\"%s\","
         "\"uptime\":\"%s\",\"timestamp\":%lu}",
         timeBuf, dateBuf, dayFullBuf,
-        getUptime().c_str(), (unsigned long)time(nullptr));
+        uptimeBuf, (unsigned long)time(nullptr));
     server.send(200, "application/json", json);
 }
 
@@ -326,6 +302,10 @@ void connectWifi() {
     if (WiFi.status() == WL_CONNECTED) {
         localIP = WiFi.localIP().toString();
         Serial.printf("\nIP: %s\n", localIP.c_str());
+        // MAX modem-sleep: радио спит дольше (просыпается по DTIM точки доступа).
+        // Заметно холоднее MIN; плата — отклик UI подрастает на десятки–сотни мс.
+        // Если понадобится максимальная отзывчивость — верни WIFI_PS_MIN_MODEM.
+        esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
         if (MDNS.begin(HOSTNAME)) {
             MDNS.addService("http", "tcp", 80);
             Serial.printf("mDNS: http://%s.local\n", HOSTNAME);
@@ -393,6 +373,9 @@ void updateTimeStrings() {
 
 // ─── Дисплей ─────────────────────────────────────────────
 void drawOLED() {
+#if !HAS_DISPLAY
+    return;
+#else
     if (!displayOn) return;
     u8g2.clearBuffer();
 
@@ -467,6 +450,7 @@ void drawOLED() {
     }
 
     u8g2.sendBuffer();
+#endif
 }
 
 // ─────────────────────────────────────────────────────────
@@ -481,14 +465,14 @@ void setup() {
     setCpuFrequencyMhz(80);
     Serial.printf("CPU @ %u MHz\n", getCpuFrequencyMhz());
 
-    esp_register_freertos_idle_hook(idleHook);   // для усреднённой загрузки CPU
-
+#if HAS_DISPLAY
     u8g2.begin();
     u8g2.setContrast(currentContrast);
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x10_tr);
     u8g2.drawStr(50, 35, "Connecting WiFi...");
     u8g2.sendBuffer();
+#endif
 
     connectWifi();
     syncNTP();
@@ -538,15 +522,15 @@ void loop() {
     static uint32_t lastHb = 0;
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
-        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u load=%u%%\n",
+        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u temp=%.1fC\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
                       (int)WiFi.RSSI(),
                       (unsigned)esp_get_free_heap_size(),
-                      getCpuLoad());
+                      (unsigned)webSocket.connectedClients(),
+                      getDieTemp());
     }
 
-    updateCpuLoad();
     delay(100);
 }

@@ -389,10 +389,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <div class="tile-value"><span id="temp">—</span><span class="unit">°C</span></div>
     </div>
     <div class="tile">
-      <div class="tile-label">Load · avg</div>
+      <div class="tile-label">Clients</div>
       <div class="inline-row">
-        <div class="tile-value"><span id="cpu-val">—</span><span class="unit">%</span></div>
-        <div class="mini-bar"><div class="cpu-mini-fill" id="cpu-bar" style="width:0%"></div></div>
+        <div class="tile-value"><span id="clients-val">—</span></div>
+        <span class="unit" style="align-self:center">viewing now</span>
       </div>
     </div>
     <div class="tile">
@@ -613,7 +613,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('ssid').textContent         = d.ssid;
     document.getElementById('ip').textContent           = d.ip;
     document.getElementById('temp').textContent         = d.temp;
-    document.getElementById('cpu-val').textContent      = d.cpu;
+    document.getElementById('clients-val').textContent  = d.clients;
     document.getElementById('rssi-val').textContent     = d.rssi;
     document.getElementById('req-count').textContent    = Number(d.requests).toLocaleString();
     document.getElementById('bright-label').textContent = d.brightness_label;
@@ -645,11 +645,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     // Питание
     if (d.display_on !== isDisplayOn) _applyPowerUI(d.display_on);
-
-    // Load (усреднённая)
-    const cpuEl = document.getElementById('cpu-bar');
-    cpuEl.style.width = d.cpu + '%';
-    cpuEl.className = 'cpu-mini-fill' + (d.cpu > 80 ? ' crit' : d.cpu > 50 ? ' warn' : '');
 
     // WiFi
     const lvl = d.rssi >= -50 ? 4 : d.rssi >= -60 ? 3 : d.rssi >= -70 ? 2 : 1;

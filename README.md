@@ -14,7 +14,7 @@ Clean minimalist firmware, a stylish live web dashboard, REST API and WebSocket 
 - Automatic brightness by time of day, plus manual control and full display off
 - Stylish live web interface (WebSocket) with a seconds progress bar and light/dark themes
 - Stopwatch with lap times — synced from the device, so a page reload picks up the real running state
-- Detailed device stats (die temperature, averaged CPU load, RAM, Wi-Fi, uptime)
+- Detailed device stats (die temperature, connected clients, RAM, Wi-Fi, uptime)
 - Full REST API + WebSocket for smart-home integrations
 - `clock.local` access via mDNS
 - Native unit tests (run without hardware) and CI with GitHub Actions
@@ -178,14 +178,18 @@ pio test -e native
 
 ## 🌡️ Power & heat
 
-`temperatureRead()` reports the **on-die** temperature, not the room. With Wi-Fi active the C3 self-heats, so an internal reading around **45–55°C** at normal room temperature is expected — it is not a fault or a sign of a busy loop. The internal sensor is also known to read high. Contributors: the RF/Wi-Fi subsystem and CPU, and (when powered from 5V USB) the on-board AMS1117 LDO dropping 5V→3.3V right next to the chip.
+`temperatureRead()` reports the **on-die** temperature, not the room — and on the ESP32-C3 it is only trustworthy **while Wi-Fi is initialized**. The sensor shares analog circuitry with the RF subsystem: with the radio off/uninitialized it reads far too high (a measured board showed ~55°C "with Wi-Fi off" vs a true ~36°C idle — physically impossible as a real temperature, purely a sensor artifact). For absolute readings use an external sensor (e.g. BMP280) against the chip.
+
+Measured on a real board (USB 5V, ~room temperature): bare idle with Wi-Fi connected ≈ **36–37°C**; full clock firmware ≈ **43°C**; raising the CPU from 80 to 160 MHz at idle added ~0°C (an idle core is clock-gated). Readings in the mid-40s are normal operation, not a fault.
+
+If the OLED panel is not soldered yet, set `#define HAS_DISPLAY 0` in `main.cpp` — otherwise U8g2 blindly bit-bangs an 8 KB frame over software SPI every second to a display that isn't there, wasting CPU and a few degrees of heat.
 
 Firmware steps already applied to keep it cooler:
 
 - **CPU at 80 MHz** (`setCpuFrequencyMhz(80)`) instead of 160 — plenty for a clock + web server, and the single biggest lever on die heat. 80 MHz is the minimum at which Wi-Fi still works.
 - **Wi-Fi modem sleep** (`WiFi.setSleep(true)`) — the radio sleeps between beacons.
 
-The dashboard shows an **averaged** CPU load ("Load · avg"). An instantaneous figure swings wildly because Wi-Fi/TCP background work is bursty, so it is measured via a FreeRTOS idle-hook and smoothed with an EMA (τ ≈ 7 s) into a stable, meaningful number — normally low single digits for a clock. The die-temperature read is cached (every 10 s) to avoid a periodic blocking call.
+The dashboard shows the number of **connected clients** (open dashboard tabs) instead of a CPU-load figure: with the power saving used here (modem/light sleep), any idle-based CPU meter misreads sleep as load, so an honest instantaneous CPU % simply isn't obtainable — while the client count is exact and actually useful. The die-temperature read is cached (every 10 s) to avoid a periodic blocking call.
 
 Hardware option: powering the board via the **3.3V pin** (bypassing the LDO) runs noticeably cooler than 5V USB. For accurate *ambient* temperature, use an external sensor (e.g. BMP280) — the die sensor is not meant for that.
 
