@@ -152,6 +152,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .section-title { font-size: 11px; font-weight: 700; color: var(--text-faint);
                    letter-spacing: 2px; text-transform: uppercase; }
 
+  /* ── Сворачиваемые блоки ── */
+  .section-head.toggle { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .section-head.toggle:hover .section-title { color: var(--text-dim); }
+  .section-head.toggle:hover .chevron { color: var(--accent); }
+  .chevron { font-size: 12px; color: var(--text-faint); transition: transform 0.2s, color 0.2s; }
+  .card.collapsed .section-head { margin-bottom: 0; }
+  .card.collapsed .chevron { transform: rotate(-90deg); }
+  .card.collapsed > *:not(.section-head) { display: none; }
+
   /* ── Статистика ── */
   .stats-card { padding: 22px 24px; }
   .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -381,8 +390,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </div>
 
 <!-- Статистика -->
-<div class="card stats-card">
-  <div class="section-head"><div class="section-title">Device stats</div></div>
+<div class="card stats-card" id="card-stats">
+  <div class="section-head toggle" onclick="toggleCard('card-stats')">
+    <div class="section-title">Device stats</div>
+    <span class="chevron">▾</span>
+  </div>
   <div class="stat-grid">
     <div class="tile">
       <div class="tile-label">Die temp</div>
@@ -430,30 +442,52 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </div>
 
 <!-- curl -->
-<div class="card curl-card">
-  <div class="section-head"><div class="section-title">API · curl</div></div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-time">curl http://&lt;IP&gt;/api/time</code>
-    <button class="curl-copy" onclick="copyCmd('curl-time',this)">copy</button>
+<div class="card curl-card" id="card-api">
+  <div class="section-head toggle" onclick="toggleCard('card-api')">
+    <div class="section-title">API · curl</div>
+    <span class="chevron">▾</span>
   </div>
   <div class="curl-row">
-    <code class="curl-line" id="curl-stats">curl http://&lt;IP&gt;/api/stats</code>
+    <code class="curl-line" id="curl-root"      data-cmd="curl http://{ip}/">curl http://&lt;IP&gt;/</code>
+    <button class="curl-copy" onclick="copyCmd('curl-root',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-stats"     data-cmd="curl http://{ip}/api/stats">curl http://&lt;IP&gt;/api/stats</code>
     <button class="curl-copy" onclick="copyCmd('curl-stats',this)">copy</button>
   </div>
   <div class="curl-row">
-    <code class="curl-line" id="curl-bright">curl -X POST http://&lt;IP&gt;/api/brightness -d "value=80"</code>
+    <code class="curl-line" id="curl-time"      data-cmd="curl http://{ip}/api/time">curl http://&lt;IP&gt;/api/time</code>
+    <button class="curl-copy" onclick="copyCmd('curl-time',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-bright"    data-cmd='curl -X POST http://{ip}/api/brightness -d "value=80"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "value=80"</code>
     <button class="curl-copy" onclick="copyCmd('curl-bright',this)">copy</button>
   </div>
   <div class="curl-row">
-    <code class="curl-line" id="curl-power">curl -X POST http://&lt;IP&gt;/api/power -d "on=0"</code>
-    <button class="curl-copy" onclick="copyCmd('curl-power',this)">copy</button>
+    <code class="curl-line" id="curl-bright-auto" data-cmd='curl -X POST http://{ip}/api/brightness -d "auto=1"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "auto=1"</code>
+    <button class="curl-copy" onclick="copyCmd('curl-bright-auto',this)">copy</button>
   </div>
-  <div class="curl-note"># brightness auto: -d "auto=1" &nbsp;|&nbsp; power on: -d "on=1"</div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-power-off" data-cmd='curl -X POST http://{ip}/api/power -d "on=0"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=0"</code>
+    <button class="curl-copy" onclick="copyCmd('curl-power-off',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-power-on"  data-cmd='curl -X POST http://{ip}/api/power -d "on=1"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=1"</code>
+    <button class="curl-copy" onclick="copyCmd('curl-power-on',this)">copy</button>
+  </div>
+  <div class="curl-row">
+    <code class="curl-line" id="curl-reboot"    data-cmd="curl -X POST http://{ip}/api/reboot">curl -X POST http://&lt;IP&gt;/api/reboot</code>
+    <button class="curl-copy" onclick="copyCmd('curl-reboot',this)">copy</button>
+  </div>
+  <div class="curl-note"># WebSocket ws://&lt;IP&gt;:81 — stopwatch: send text "sw:start" / "sw:pause" / "sw:reset"</div>
 </div>
 
 <!-- Chip info -->
-<div class="card chip-card">
-  <div class="section-head"><div class="section-title">Microcontroller · ESP32-C3 Super Mini</div></div>
+<div class="card chip-card" id="card-chip">
+  <div class="section-head toggle" onclick="toggleCard('card-chip')">
+    <div class="section-title">Microcontroller · ESP32-C3 Super Mini</div>
+    <span class="chevron">▾</span>
+  </div>
   <div class="chip-grid">
     <div class="chip-item"><span class="chip-key">Architecture</span><span class="chip-val">RISC-V 32-bit</span></div>
     <div class="chip-item"><span class="chip-key">Core / Freq</span><span class="chip-val">1x up to 160 MHz</span></div>
@@ -486,6 +520,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   // Показываем реальный хост в чипе (clock.local или IP)
   document.getElementById('host-chip').textContent = location.hostname || 'clock.local';
+
+  // ── Сворачивание блоков ──────────────────────────────
+  function toggleCard(id) {
+    const card = document.getElementById(id);
+    if (!card) return;
+    card.classList.toggle('collapsed');
+    try { localStorage.setItem('collapsed:' + id, card.classList.contains('collapsed') ? '1' : '0'); } catch(e) {}
+  }
+  ['card-stats', 'card-api', 'card-chip'].forEach(function(id) {
+    try {
+      if (localStorage.getItem('collapsed:' + id) === '1')
+        document.getElementById(id).classList.add('collapsed');
+    } catch(e) {}
+  });
 
   // ── Состояние ────────────────────────────────────────
   let isManual          = false;
@@ -620,11 +668,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     updateSecBar(d.time);
 
-    // curl-примеры под реальный IP
-    document.getElementById('curl-time')  .textContent = 'curl http://' + d.ip + '/api/time';
-    document.getElementById('curl-stats') .textContent = 'curl http://' + d.ip + '/api/stats';
-    document.getElementById('curl-bright').textContent = 'curl -X POST http://' + d.ip + '/api/brightness -d "value=80"';
-    document.getElementById('curl-power') .textContent = 'curl -X POST http://' + d.ip + '/api/power -d "on=0"';
+    // curl-примеры под реальный IP (шаблоны в data-cmd, плейсхолдер {ip})
+    document.querySelectorAll('.curl-line[data-cmd]').forEach(function(el) {
+      el.textContent = el.getAttribute('data-cmd').replace('{ip}', d.ip);
+    });
 
     // Слайдер — не трогаем, пока пользователь двигает или есть pending-запрос
     if (!isDragging && !modeChangePending && !isManual) {
