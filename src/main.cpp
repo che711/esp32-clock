@@ -10,7 +10,7 @@
 #include "web_ui.h"
 #include "clock_utils.h"
 
-const char* WIFI_SSID = "network";
+const char* WIFI_SSID = "netwrok";
 const char* WIFI_PASS = "password";
 
 const char* HOSTNAME   = "clock";           // → http://clock.local
