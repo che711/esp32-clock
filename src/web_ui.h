@@ -104,6 +104,29 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     padding: 4px 12px; letter-spacing: 0.4px;
   }
 
+  /* ── Порядок блоков (flex order) ── */
+  .app-header    { order: 0; }
+  .clock-card    { order: 1; }
+  .stopwatch-card{ order: 2; }
+  .brightness-card { order: 3; }
+  .controls-card { order: 4; }
+  .stats-card    { order: 5; }
+  .curl-card     { order: 6; }
+  .chip-card     { order: 7; }
+  .status-bar    { order: 8; }
+
+  /* При активном секундомере он и часы меняются местами */
+  body.sw-active .clock-card     { order: 2; }
+  body.sw-active .stopwatch-card { order: 1; }
+
+  /* …и секундомер становится крупнее (герой) */
+  body.sw-active .stopwatch-card { padding: 32px 26px 30px; }
+  body.sw-active .sw-display {
+    font-size: clamp(56px, 15vw, 104px);
+    margin: 12px 0 22px;
+    transition: font-size 0.25s ease;
+  }
+
   .theme-btn {
     position: fixed; top: 16px; right: 16px;
     width: 42px; height: 42px; border-radius: 50%;
@@ -751,6 +774,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
 
   // Приводим локальный секундомер к состоянию устройства (state: 0=idle,1=run,2=pause)
+  // Секундомер становится «героем» (наверх + крупнее), когда активен
+  function setSwHero(active) {
+    document.body.classList.toggle('sw-active', active);
+  }
+
   function adoptStopwatch(state, ms) {
     cancelAnimationFrame(swRafId);
     swLaps = []; swLastLapMs = 0;
@@ -765,6 +793,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.textContent = 'Pause';
       startBtn.classList.add('running');
       lapBtn.disabled = false;
+      setSwHero(true);
       swTick();
     } else if (state === 2) {          // PAUSED
       swRunning = false;
@@ -774,6 +803,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.textContent = 'Resume';
       startBtn.classList.remove('running');
       lapBtn.disabled = (ms <= 0);
+      setSwHero(true);
     } else {                           // IDLE
       swRunning = false;
       swAccum   = 0;
@@ -782,6 +812,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.textContent = 'Start';
       startBtn.classList.remove('running');
       lapBtn.disabled = true;
+      setSwHero(false);
     }
   }
 
@@ -794,6 +825,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.textContent = 'Pause';
       startBtn.classList.add('running');
       document.getElementById('sw-lap-btn').disabled = false;
+      setSwHero(true);
       swTick();
     } else {
       swRunning = false;
@@ -812,13 +844,23 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
 
   function swRender(ms) {
-    const totalMs = Math.floor(ms);
-    const mins    = Math.floor(totalMs / 60000);
-    const secs    = Math.floor((totalMs % 60000) / 1000);
-    const millis  = totalMs % 1000;
-    document.getElementById('sw-display').innerHTML =
-      String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') +
-      '<span class="sw-ms">.' + String(millis).padStart(3,'0') + '</span>';
+    const totalMs  = Math.floor(ms);
+    const totalSec = Math.floor(totalMs / 1000);
+    const p2 = (n) => String(n).padStart(2, '0');
+    let html;
+    if (totalSec < 3600) {
+      const mins   = Math.floor(totalSec / 60);
+      const secs   = totalSec % 60;
+      const millis = totalMs % 1000;
+      html = p2(mins) + ':' + p2(secs) +
+             '<span class="sw-ms">.' + String(millis).padStart(3, '0') + '</span>';
+    } else {
+      const hours = Math.floor(totalSec / 3600);
+      const mins  = Math.floor((totalSec % 3600) / 60);
+      const secs  = totalSec % 60;
+      html = p2(hours) + ':' + p2(mins) + ':' + p2(secs);
+    }
+    document.getElementById('sw-display').innerHTML = html;
   }
 
   function swLap() {
@@ -845,6 +887,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     cancelAnimationFrame(swRafId);
     swRender(0);
     swSend('sw:reset');
+    setSwHero(false);
     document.getElementById('sw-start-btn').textContent = 'Start';
     document.getElementById('sw-start-btn').classList.remove('running');
     document.getElementById('sw-lap-btn').disabled = true;
@@ -853,10 +896,18 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   function swFmt(ms) {
     ms = Math.floor(ms);
-    const mi = Math.floor(ms / 60000);
-    const sc = Math.floor((ms % 60000) / 1000);
-    const ml = ms % 1000;
-    return String(mi).padStart(2,'0') + ':' + String(sc).padStart(2,'0') + '.' + String(ml).padStart(3,'0');
+    const totalSec = Math.floor(ms / 1000);
+    const p2 = (n) => String(n).padStart(2, '0');
+    if (totalSec < 3600) {
+      const mi = Math.floor(totalSec / 60);
+      const sc = totalSec % 60;
+      const ml = ms % 1000;
+      return p2(mi) + ':' + p2(sc) + '.' + String(ml).padStart(3, '0');
+    }
+    const h = Math.floor(totalSec / 3600);
+    const mi = Math.floor((totalSec % 3600) / 60);
+    const sc = totalSec % 60;
+    return p2(h) + ':' + p2(mi) + ':' + p2(sc);
   }
 
   wsConnect();

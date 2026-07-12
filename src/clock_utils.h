@@ -57,13 +57,23 @@ inline void formatDate(int day, const char* month, int year,
 }
 
 // ─── Форматирование секундомера ───────────────────────────
-// Общая логика MM:SS.mmm, чтобы её можно было покрыть тестом.
+// До 60 минут  → MM:SS.mmm  (с миллисекундами)
+// От 60 минут  → HH:MM:SS   (миллисекунды уже не нужны)
 inline void formatStopwatch(uint32_t ms, char* buf, size_t sz) {
-    uint32_t mins   = (ms / 60000) % 100;   // до 99 минут
-    uint32_t secs   = (ms / 1000)  % 60;
-    uint32_t millis = ms % 1000;
-    snprintf(buf, sz, "%02u:%02u.%03u",
-             (unsigned)mins, (unsigned)secs, (unsigned)millis);
+    uint32_t totalSec = ms / 1000;
+    if (totalSec < 3600) {
+        uint32_t mins   = totalSec / 60;
+        uint32_t secs   = totalSec % 60;
+        uint32_t millis = ms % 1000;
+        snprintf(buf, sz, "%02u:%02u.%03u",
+                 (unsigned)mins, (unsigned)secs, (unsigned)millis);
+    } else {
+        uint32_t hours = totalSec / 3600;
+        uint32_t mins  = (totalSec % 3600) / 60;
+        uint32_t secs  = totalSec % 60;
+        snprintf(buf, sz, "%02u:%02u:%02u",
+                 (unsigned)hours, (unsigned)mins, (unsigned)secs);
+    }
 }
 
 // ─── Валидация JSON-поля ──────────────────────────────────
