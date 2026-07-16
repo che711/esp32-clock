@@ -107,16 +107,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   /* ── Порядок блоков (flex order) ── */
   .app-header    { order: 0; }
   .clock-card    { order: 1; }
-  .stopwatch-card{ order: 2; }
-  .brightness-card { order: 3; }
-  .controls-card { order: 4; }
-  .stats-card    { order: 5; }
-  .curl-card     { order: 6; }
-  .chip-card     { order: 7; }
-  .status-bar    { order: 8; }
+  .weather-card  { order: 2; }
+  .stopwatch-card{ order: 3; }
+  .brightness-card { order: 4; }
+  .controls-card { order: 5; }
+  .stats-card    { order: 6; }
+  .curl-card     { order: 7; }
+  .chip-card     { order: 8; }
+  .status-bar    { order: 9; }
 
-  /* При активном секундомере он и часы меняются местами */
-  body.sw-active .clock-card     { order: 2; }
+  /* При активном секундомере он и часы меняются местами (секундомер наверх) */
+  body.sw-active .clock-card     { order: 3; }
   body.sw-active .stopwatch-card { order: 1; }
 
   /* …и секундомер становится крупнее (герой) */
@@ -183,6 +184,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .card.collapsed .section-head { margin-bottom: 0; }
   .card.collapsed .chevron { transform: rotate(-90deg); }
   .card.collapsed > *:not(.section-head) { display: none; }
+
+  /* ── Погода ── */
+  .weather-card { padding: 22px 24px; }
+  .weather-hero { display: flex; align-items: baseline; justify-content: space-between;
+                  gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .weather-temp { font-family: 'JetBrains Mono', monospace; font-size: clamp(36px,9vw,56px);
+                  font-weight: 700; color: var(--text); line-height: 1;
+                  text-shadow: 0 0 18px rgba(245,177,60,0.18); }
+  [data-theme="light"] .weather-temp { text-shadow: none; }
+  .weather-temp .unit { font-size: 0.38em; color: var(--text-dim); margin-left: 2px; }
+  .weather-forecast { font-size: 15px; color: var(--text-dim); font-weight: 500; }
 
   /* ── Статистика ── */
   .stats-card { padding: 22px 24px; }
@@ -363,6 +375,38 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
 </div>
 
+<!-- Погода -->
+<div class="card weather-card" id="card-weather">
+  <div class="section-head toggle" onclick="toggleCard('card-weather')">
+    <div class="section-title">Weather · BMP280</div>
+    <span class="chevron">▾</span>
+  </div>
+  <div class="weather-hero">
+    <div class="weather-temp"><span id="w-temp">—</span><span class="unit">°C</span></div>
+    <div class="weather-forecast"><span id="w-forecast-emoji">—</span> <span id="w-forecast">—</span></div>
+  </div>
+  <div class="stat-grid">
+    <div class="tile">
+      <div class="tile-label">Pressure</div>
+      <div class="tile-value"><span id="w-pressure">—</span><span class="unit">hPa</span></div>
+      <div class="ram-sub"><span id="w-pressure-mmhg">—</span> mmHg</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">Altitude</div>
+      <div class="tile-value"><span id="w-altitude">—</span><span class="unit">m</span></div>
+      <div class="ram-sub">trend <span id="w-trend">—</span> hPa/h</div>
+    </div>
+    <div class="tile wide" id="tile-battery">
+      <div class="tile-label">Battery</div>
+      <div class="inline-row">
+        <div class="tile-value"><span id="w-bat-pct">—</span><span class="unit">%</span></div>
+        <div class="mini-bar"><div class="ram-bar-fill" id="w-bat-bar" style="width:0%"></div></div>
+        <div class="ram-sub" style="margin-left:auto"><span id="w-bat-v">—</span> V</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Секундомер -->
 <div class="card stopwatch-card">
   <div class="section-head">
@@ -508,16 +552,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!-- Chip info -->
 <div class="card chip-card" id="card-chip">
   <div class="section-head toggle" onclick="toggleCard('card-chip')">
-    <div class="section-title">Microcontroller · ESP32-C3 Super Mini</div>
+    <div class="section-title">Microcontroller · ESP32-C6-Zero</div>
     <span class="chevron">▾</span>
   </div>
   <div class="chip-grid">
     <div class="chip-item"><span class="chip-key">Architecture</span><span class="chip-val">RISC-V 32-bit</span></div>
     <div class="chip-item"><span class="chip-key">Core / Freq</span><span class="chip-val">1x up to 160 MHz</span></div>
     <div class="chip-item"><span class="chip-key">Flash</span><span class="chip-val">4 MB</span></div>
-    <div class="chip-item"><span class="chip-key">SRAM</span><span class="chip-val">400 KB</span></div>
-    <div class="chip-item"><span class="chip-key">WiFi</span><span class="chip-val">802.11 b/g/n 2.4 GHz</span></div>
-    <div class="chip-item"><span class="chip-key">Bluetooth</span><span class="chip-val">BLE 5.0</span></div>
+    <div class="chip-item"><span class="chip-key">SRAM</span><span class="chip-val">512 KB</span></div>
+    <div class="chip-item"><span class="chip-key">WiFi</span><span class="chip-val">WiFi 6 (2.4 GHz)</span></div>
+    <div class="chip-item"><span class="chip-key">Bluetooth</span><span class="chip-val">BLE 5 + Zigbee/Thread</span></div>
     <div class="chip-item"><span class="chip-key">Display</span><span class="chip-val">SSD1322 256x64 SPI</span></div>
     <div class="chip-item"><span class="chip-key">Protocol</span><span class="chip-val">REST + WebSocket :81</span></div>
   </div>
@@ -551,7 +595,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     card.classList.toggle('collapsed');
     try { localStorage.setItem('collapsed:' + id, card.classList.contains('collapsed') ? '1' : '0'); } catch(e) {}
   }
-  ['card-stats', 'card-api', 'card-chip'].forEach(function(id) {
+  ['card-weather', 'card-stats', 'card-api', 'card-chip'].forEach(function(id) {
     try {
       if (localStorage.getItem('collapsed:' + id) === '1')
         document.getElementById(id).classList.add('collapsed');
@@ -690,6 +734,36 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('bright-label').textContent = d.brightness_label;
 
     updateSecBar(d.time);
+
+    // ── Погода (BMP280) ──
+    if (d.bmp_valid) {
+      document.getElementById('w-temp').textContent          = d.bmp_temp.toFixed(1);
+      document.getElementById('w-pressure').textContent      = d.pressure.toFixed(1);
+      document.getElementById('w-pressure-mmhg').textContent = d.pressure_mmhg.toFixed(0);
+      document.getElementById('w-altitude').textContent      = d.altitude.toFixed(0);
+      document.getElementById('w-trend').textContent         = (d.trend >= 0 ? '+' : '') + d.trend.toFixed(2);
+      const FC = [['—','No data'], ['☀️','Clear'], ['⛅','Variable'], ['🌧️','Rain']];
+      const fc = FC[d.forecast] || FC[0];
+      document.getElementById('w-forecast-emoji').textContent = fc[0];
+      document.getElementById('w-forecast').textContent       = fc[1];
+    } else {
+      document.getElementById('w-temp').textContent = '—';
+      document.getElementById('w-forecast').textContent = 'no sensor';
+      document.getElementById('w-forecast-emoji').textContent = '⚠️';
+    }
+
+    // ── Батарея (прячем, если питание от USB) ──
+    const batTile = document.getElementById('tile-battery');
+    if (d.bat_valid) {
+      batTile.style.display = '';
+      document.getElementById('w-bat-pct').textContent = d.bat_pct;
+      document.getElementById('w-bat-v').textContent   = d.bat_v.toFixed(2);
+      const bbar = document.getElementById('w-bat-bar');
+      bbar.style.width = d.bat_pct + '%';
+      bbar.className = 'ram-bar-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
+    } else {
+      batTile.style.display = 'none';
+    }
 
     // curl-примеры под реальный IP (шаблоны в data-cmd, плейсхолдер {ip})
     document.querySelectorAll('.curl-line[data-cmd]').forEach(function(el) {

@@ -3,42 +3,43 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <ESPmDNS.h>
+#include <ArduinoOTA.h>
 #include <esp_wifi.h>
 #include <time.h>
 #include <U8g2lib.h>
 #include <SPI.h>
-#include "web_ui.h"
+#include "config.h"
 #include "clock_utils.h"
+#include "sensor.h"
+#include "battery.h"
+#include "mqtt.h"
+#include "web_ui.h"
 
-const char* WIFI_SSID = "netwrok";
-const char* WIFI_PASS = "password";
-
-const char* HOSTNAME   = "clock";           // → http://clock.local
-const char* NTP_SERVER = "pool.ntp.org";
-
-// Часовой пояс задаётся POSIX-строкой TZ, а НЕ фиксированным сдвигом.
-// Так переход на летнее/зимнее время происходит автоматически.
-// Ниже — Варшава/Центральная Европа. Примеры для других зон:
-//   Лондон:   "GMT0BST,M3.5.0/1,M10.5.0"
-//   Киев:     "EET-2EEST,M3.5.0/3,M10.5.0/4"
-//   UTC:      "UTC0"
-const char* TZ_INFO = "CET-1CEST,M3.5.0,M10.5.0/3";
-
-#define PIN_CLK  6
-#define PIN_DIN  7
-#define PIN_CS   10
-#define PIN_DC   1
-#define PIN_RST  3
-
-// Пока OLED не подпаян — поставь 0: уберёт слепой битбанг 8 КБ/с по SW-SPI
-// (u8g2 не знает, что панели нет, и шлёт кадры впустую, грея ядро).
-#define HAS_DISPLAY 1
+// Совместимость имён: config.h ↔ прежний код часов
+#define WIFI_PASS  WIFI_PASSWORD
+#define HOSTNAME   DEVICE_HOSTNAME
+#define PIN_CLK    OLED_CLK_PIN
+#define PIN_DIN    OLED_DIN_PIN
+#define PIN_CS     OLED_CS_PIN
+#define PIN_DC     OLED_DC_PIN
+#define PIN_RST    OLED_RST_PIN
 
 U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI
     u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
 
 WebServer        server(80);
 WebSocketsServer webSocket(81);
+
+// ── Метео / батарея / LED ────────────────────────────────
+static SensorData  weather{};
+static BatteryData battery{};
+static uint32_t    lastSensorMs = 0;
+
+// WS2812 на GPIO8: pinMode НЕ вызывать — сломает RMT адресного LED
+static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
+    rgbLedWrite(LED_PIN, r, g, b);
+}
+
 
 const char* DAYS_SHORT[] = { "SUN","MON","TUE","WED","THU","FRI","SAT" };
 const char* DAYS_FULL[]  = { "Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday" };
@@ -140,6 +141,17 @@ void buildJson(char* buf, size_t sz) {
         "\"display_on\":%s,"
         "\"sw_state\":%d,"
         "\"sw_ms\":%lu,"
+        "\"bmp_valid\":%s,"
+        "\"bmp_temp\":%.2f,"
+        "\"pressure\":%.2f,"
+        "\"pressure_mmhg\":%.1f,"
+        "\"altitude\":%.1f,"
+        "\"trend\":%.2f,"
+        "\"forecast\":%d,"
+        "\"bat_valid\":%s,"
+        "\"bat_pct\":%d,"
+        "\"bat_v\":%.2f,"
+        "\"bat_low\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -156,13 +168,24 @@ void buildJson(char* buf, size_t sz) {
         displayOn        ? "true" : "false",
         (int)swState,
         (unsigned long)swElapsed(),
+        weather.valid ? "true" : "false",
+        weather.temperature,
+        weather.pressure,
+        weather.pressureMmHg,
+        weather.altitude,
+        weather.pressureTrend,
+        (int)weather.forecastIcon,
+        battery.valid ? "true" : "false",
+        (int)battery.percent,
+        battery.voltage,
+        battery.low ? "true" : "false",
         (unsigned long)requestCount
     );
 }
 
 void broadcastState() {
     if (webSocket.connectedClients() == 0) return;  // некому слать — не тратим CPU
-    char json[768];
+    char json[1024];
     buildJson(json, sizeof(json));
     webSocket.broadcastTXT(json);
 }
@@ -175,7 +198,7 @@ void handleRoot() {
 
 void handleApiStats() {
     requestCount++;
-    char json[768];
+    char json[1024];
     buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
@@ -273,7 +296,7 @@ void swReset() {
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
         requestCount++;
-        char json[768];
+        char json[1024];
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
@@ -371,6 +394,45 @@ void updateTimeStrings() {
     }
 }
 
+// ─── Нижняя строка OLED: погода + батарея ────────────────
+#if HAS_DISPLAY
+// Маленькая иконка батареи: рамка + «носик» + заливка по проценту.
+// Рисует левым краем в x, верх иконки yTop (высота 7). Возвращает полную ширину.
+static int drawBattIcon(int x, int yTop, uint8_t pct) {
+    const int w = 14, h = 7;
+    u8g2.drawFrame(x, yTop, w, h);              // контур тела
+    u8g2.drawBox(x + w, yTop + 2, 2, 3);        // носик
+    int fillW = (int)pct * (w - 2) / 100;       // заливка пропорционально
+    if (fillW > 0) u8g2.drawBox(x + 1, yTop + 1, fillW, h - 2);
+    return w + 2;                               // тело + носик
+}
+
+// Нижняя строка (y=63): слева prefix+погода, справа иконка батареи + проценты.
+static void drawBottomStatus(const char* prefix) {
+    u8g2.setFont(u8g2_font_5x7_tr);
+
+    char left[48];
+    if (weather.valid)
+        snprintf(left, sizeof(left), "%s%.1fC  %.0fhPa",
+                 prefix, weather.temperature, weather.pressure);
+    else
+        snprintf(left, sizeof(left), "%sno sensor", prefix);
+    u8g2.drawStr(2, 63, left);
+
+    // Батарея — только если обнаружена (иначе питание от USB)
+    if (battery.valid) {
+        char pctStr[6];
+        snprintf(pctStr, sizeof(pctStr), "%u%%", battery.percent);
+        int pctW   = u8g2.getStrWidth(pctStr);
+        int iconW  = 16;                         // 14 тело + 2 носик
+        int totalW = iconW + 3 + pctW;
+        int x      = 256 - totalW - 2;
+        drawBattIcon(x, 56, battery.percent);    // верх 56 → низ 62, вровень с текстом
+        u8g2.drawStr(x + iconW + 3, 63, pctStr);
+    }
+}
+#endif
+
 // ─── Дисплей ─────────────────────────────────────────────
 void drawOLED() {
 #if !HAS_DISPLAY
@@ -404,11 +466,8 @@ void drawOLED() {
 
         u8g2.drawHLine(0, 53, 256);
 
-        // Статус внизу
-        u8g2.setFont(u8g2_font_5x7_tr);
-        const char* statusStr = (swState == SW_RUNNING) ? "STOPWATCH  RUNNING" : "STOPWATCH  PAUSED";
-        int statusW = u8g2.getStrWidth(statusStr);
-        u8g2.drawStr((256 - statusW) / 2, 63, statusStr);
+        // Низ: погода + батарея, с маркером состояния секундомера
+        drawBottomStatus(swState == SW_RUNNING ? "" : "II ");
 
     } else {
         // ── Обычный режим часов ────────────────────────
@@ -432,24 +491,62 @@ void drawOLED() {
 
         u8g2.drawHLine(0, 53, 256);
 
-        u8g2.setFont(u8g2_font_5x7_tr);
-        if (timeSynced) {
-            char ssidShort[10];
-            strncpy(ssidShort, WIFI_SSID, 8);
-            ssidShort[8] = 0;
-            char bottom[56];
-            if (localIP.length())
-                snprintf(bottom, sizeof(bottom), "%s %s | %s %s",
-                         dayShortBuf, dateBuf, ssidShort, localIP.c_str());
-            else
-                snprintf(bottom, sizeof(bottom), "%s %s", dayShortBuf, dateBuf);
-            u8g2.drawStr(2, 63, bottom);
-        } else {
-            u8g2.drawStr(2, 63, "NO NTP");
-        }
+        // Низ: [день недели] погода + батарея
+        char pfx[8];
+        if (timeSynced) snprintf(pfx, sizeof(pfx), "%s  ", dayShortBuf);
+        else            snprintf(pfx, sizeof(pfx), "%s", "");
+        drawBottomStatus(pfx);
     }
 
     u8g2.sendBuffer();
+#endif
+}
+
+// ─── Метео: HTTP + опрос датчика ─────────────────────────
+void handleApiWeather() {
+    requestCount++;
+    char json[320];
+    snprintf(json, sizeof(json),
+        "{\"valid\":%s,\"temperature\":%.2f,\"pressure\":%.2f,"
+        "\"pressure_mmhg\":%.1f,\"altitude\":%.1f,\"qnh\":%.2f,"
+        "\"air_density\":%.4f,\"trend\":%.2f,\"forecast\":%d,"
+        "\"battery_valid\":%s,\"battery_pct\":%d,\"battery_v\":%.2f}",
+        weather.valid ? "true" : "false",
+        weather.temperature, weather.pressure, weather.pressureMmHg,
+        weather.altitude, weather.pressureQnh, weather.airDensity,
+        weather.pressureTrend, (int)weather.forecastIcon,
+        battery.valid ? "true" : "false",
+        (int)battery.percent, battery.voltage);
+    server.send(200, "application/json", json);
+}
+
+// Опрос BMP280 + батареи по таймеру + индикация LED
+void updateWeather() {
+    uint32_t now = millis();
+    if (now - lastSensorMs >= SENSOR_INTERVAL_MS) {
+        lastSensorMs = now;
+        weather = sensorRead();
+        battery = batteryRead();
+        if (!weather.valid) {
+            ledColor(4, 0, 0);                         // красный — ошибка датчика
+        } else if (battery.valid && battery.low) {
+            ledColor(6, 3, 0); delay(30); ledColor(0, 0, 0);  // жёлтый мигок — АКБ разряжена
+        } else {
+            ledColor(0, 3, 0); delay(30); ledColor(0, 0, 0);  // зелёный мигок — норма
+        }
+    }
+}
+
+// ─── OTA по воздуху ──────────────────────────────────────
+void otaInit() {
+#if OTA_ENABLED
+    ArduinoOTA.setHostname(HOSTNAME);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.onStart([]()  { ledColor(20, 10, 0); Serial.println("[OTA] start"); });
+    ArduinoOTA.onEnd([]()    { ledColor(0, 20, 0);  Serial.println("[OTA] done");  });
+    ArduinoOTA.onError([](ota_error_t e){ ledColor(20, 0, 0); Serial.printf("[OTA] err %u\n", e); });
+    ArduinoOTA.begin();
+    Serial.println("[OTA] ready");
 #endif
 }
 
@@ -458,12 +555,21 @@ void setup() {
     Serial.begin(115200);
     delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
 
-    Serial.println("\n=== ESP32-C3 Clock boot ===");
+    Serial.println("\n=== ESP32-C6 Clock + Weather boot ===");
+    ledColor(0, 0, 5);   // dim синий на старте
 
     // 80 МГц вместо 160: для часов + веб-сервера хватает с запасом,
     // а нагрев кристалла и потребление заметно ниже. 80 — минимум для WiFi.
     setCpuFrequencyMhz(80);
     Serial.printf("CPU @ %u MHz\n", getCpuFrequencyMhz());
+
+    // Датчик BMP280 и батарея
+    if (!sensorInit()) {
+        for (int i = 0; i < 4; i++) { ledColor(20,0,0); delay(150); ledColor(0,0,0); delay(150); }
+    }
+    batteryInit();
+    weather = sensorRead();
+    battery = batteryRead();
 
 #if HAS_DISPLAY
     u8g2.begin();
@@ -476,10 +582,12 @@ void setup() {
 
     connectWifi();
     syncNTP();
+    otaInit();
 
     server.on("/",               HTTP_GET,  handleRoot);
     server.on("/api/stats",      HTTP_GET,  handleApiStats);
     server.on("/api/time",       HTTP_GET,  handleApiTime);
+    server.on("/api/weather",    HTTP_GET,  handleApiWeather);
     server.on("/api/brightness", HTTP_POST, handleApiBrightness);
     server.on("/api/power",      HTTP_POST, handleApiPower);
     server.on("/api/reboot",     HTTP_POST, handleReboot);
@@ -489,13 +597,21 @@ void setup() {
     webSocket.begin();
     webSocket.onEvent(webSocketEvent);
 
+#if MQTT_ENABLED
+    mqttInit();
+#endif
+
     Serial.println("HTTP :80  WS :81");
 }
 
 void loop() {
+#if OTA_ENABLED
+    ArduinoOTA.handle();
+#endif
     server.handleClient();
     webSocket.loop();
     maintainNetwork();
+    updateWeather();          // BMP280 + батарея по таймеру + LED
     updateTimeStrings();
 
     if (swState == SW_RUNNING) {
@@ -518,18 +634,26 @@ void loop() {
         }
     }
 
+#if MQTT_ENABLED
+    mqttLoop(weather, battery);
+#endif
+
     // Пульс в Serial раз в 5 с — монитор покажет жизнь, когда бы его ни открыли
     static uint32_t lastHb = 0;
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
-        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u temp=%.1fC\n",
+        Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u "
+                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%%\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
                       (int)WiFi.RSSI(),
                       (unsigned)esp_get_free_heap_size(),
                       (unsigned)webSocket.connectedClients(),
-                      getDieTemp());
+                      getDieTemp(),
+                      weather.valid ? weather.temperature : 0.0f,
+                      weather.valid ? weather.pressure : 0.0f,
+                      battery.valid ? battery.percent : -1);
     }
 
     delay(100);
