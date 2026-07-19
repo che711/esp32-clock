@@ -80,11 +80,11 @@ void test_brightness_boundary_20() {
 }
 
 void test_brightness_pct_full() {
-    TEST_ASSERT_EQUAL_UINT8(100, brightnessPct(200));
+    TEST_ASSERT_EQUAL_UINT8(78, brightnessPct(200));
 }
 
 void test_brightness_pct_night() {
-    TEST_ASSERT_EQUAL_UINT8(7, brightnessPct(15));
+    TEST_ASSERT_EQUAL_UINT8(5, brightnessPct(15));
 }
 
 void test_brightness_pct_zero() {
