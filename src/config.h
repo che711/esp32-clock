@@ -81,5 +81,5 @@
 #define PRESSURE_HISTORY_INTERVAL_MS 300000UL  // точка истории давления (5 мин)
 
 // ── OTA ──────────────────────────────────────────────────────
-#define OTA_ENABLED  true
+#define OTA_ENABLED  false
 #define OTA_PASSWORD "ota_password"
