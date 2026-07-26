@@ -94,7 +94,3 @@
 #define MQTT_INTERVAL_MS     30000UL  // публикация MQTT (≥ SENSOR_INTERVAL)
 #define MQTT_RECONNECT_MS     5000UL
 #define PRESSURE_HISTORY_INTERVAL_MS 300000UL  // точка истории давления (5 мин)
-
-// ── OTA ──────────────────────────────────────────────────────
-#define OTA_ENABLED  false
-#define OTA_PASSWORD "ota_password"
