@@ -9,345 +9,437 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <title>ESP32 Clock</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
   :root {
-    --bg:          #0e0c09;
-    --bg-2:        #171009;
-    --surface:     #17130d;
-    --surface-2:   #1d170e;
-    --line:        #2c2318;
-    --line-soft:   #241d13;
-    --text:        #f3ead9;
-    --text-dim:    #b39c7d;
-    --text-faint:  #766444;
-    --accent:      #f5b13c;
-    --accent-2:    #ffd486;
-    --accent-soft: rgba(245,177,60,0.14);
-    --good:        #64d19b;
-    --warn:        #f0a53c;
-    --crit:        #ef6a5a;
-    --slider-bg:   #241d13;
-    --code:        #ffcf7a;
-    --shadow:      0 18px 46px rgba(0,0,0,0.55);
-    --glow:        0 0 34px rgba(245,177,60,0.16);
+    --bg:          #0a0f18;
+    --bg-2:        #101a2c;
+    --surface:     #141c2b;
+    --surface-2:   #0f1725;
+    --surface-3:   #1a2334;
+    --line:        #24314a;
+    --line-soft:   #1b2436;
+    --text:        #e9eff8;
+    --text-dim:    #93a3bb;
+    --text-faint:  #607089;
+    --accent:      #5b8cf0;
+    --accent-2:    #86aaff;
+    --accent-soft: rgba(91,140,240,0.15);
+    --good:        #5cc389;
+    --warn:        #e9a54a;
+    --crit:        #ef6a55;
+    --info:        #6b9bff;
+    --track:       #1c2537;
+    --code:        #9dbdff;
+    --shadow:      0 20px 50px rgba(0,0,0,0.45);
+
+    /* Акцентные цвета метрик (полоска сверху карточки + график) */
+    --c-temp:  #f0a45c;  --c-temp2:  #f7c88f;  --c-temp-soft:  rgba(240,164,92,0.13);
+    --c-press: #6b9bff;  --c-press2: #9dc0ff;  --c-press-soft: rgba(107,155,255,0.13);
+    --c-alt:   #ef7a5c;  --c-alt2:   #f8a98f;  --c-alt-soft:   rgba(239,122,92,0.13);
+    --c-fc:    #5cc389;  --c-fc2:    #8fdcb1;  --c-fc-soft:    rgba(92,195,137,0.13);
   }
 
   [data-theme="light"] {
-    --bg:          #f6f0e5;
-    --bg-2:        #efe6d4;
-    --surface:     #fffdf8;
-    --surface-2:   #fbf5ea;
-    --line:        #e7dcc6;
-    --line-soft:   #efe6d5;
-    --text:        #2b2114;
-    --text-dim:    #7c6a4d;
-    --text-faint:  #ab9a7c;
-    --accent:      #c07d12;
-    --accent-2:    #a9690a;
-    --accent-soft: rgba(192,125,18,0.13);
-    --good:        #2f9e6a;
-    --warn:        #c07d12;
-    --crit:        #cf4b3a;
-    --slider-bg:   #eaddc5;
-    --code:        #8a5a08;
-    --shadow:      0 14px 34px rgba(120,90,40,0.16);
-    --glow:        0 0 26px rgba(192,125,18,0.14);
+    --bg:          #eef2f8;
+    --bg-2:        #e2eaf6;
+    --surface:     #ffffff;
+    --surface-2:   #f3f6fb;
+    --surface-3:   #eaeff7;
+    --line:        #dbe3ef;
+    --line-soft:   #e6ecf5;
+    --text:        #15202f;
+    --text-dim:    #5a6a80;
+    --text-faint:  #8798ae;
+    --accent:      #2f66d8;
+    --accent-2:    #1d4fbd;
+    --accent-soft: rgba(47,102,216,0.11);
+    --good:        #21955f;
+    --warn:        #b4761b;
+    --crit:        #cf4b34;
+    --info:        #2f66d8;
+    --track:       #e2e8f2;
+    --code:        #2b52a8;
+    --shadow:      0 14px 34px rgba(30,50,90,0.10);
+
+    --c-temp:  #cb7a20;  --c-temp2:  #e09a45;  --c-temp-soft:  rgba(203,122,32,0.11);
+    --c-press: #2f66d8;  --c-press2: #5b8cf0;  --c-press-soft: rgba(47,102,216,0.11);
+    --c-alt:   #d1502f;  --c-alt2:   #e87b5b;  --c-alt-soft:   rgba(209,80,47,0.11);
+    --c-fc:    #21955f;  --c-fc2:    #46b681;  --c-fc-soft:    rgba(33,149,95,0.11);
   }
 
   body {
     background:
-      radial-gradient(1100px 520px at 50% -8%, var(--bg-2), transparent 62%),
+      radial-gradient(1200px 620px at 50% -12%, var(--bg-2), transparent 64%),
       var(--bg);
     color: var(--text);
-    font-family: 'Space Grotesk', system-ui, sans-serif;
-    min-height: 100vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: flex-start;
-    padding: 24px 16px 48px; gap: 13px;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    display: flex; justify-content: center;
+    padding: 22px 14px 44px;
     -webkit-font-smoothing: antialiased;
     transition: background 0.4s, color 0.4s;
   }
 
-  .card {
-    position: relative;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 20px; width: min(560px, 100%);
-    box-shadow: var(--shadow);
-    animation: rise 0.5s cubic-bezier(.2,.7,.3,1) both;
-    transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
-  }
-  .card:hover { border-color: var(--line); transform: translateY(-1px); }
-  @keyframes rise { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: none; } }
-  .card:nth-of-type(2){animation-delay:.04s}.card:nth-of-type(3){animation-delay:.08s}
-  .card:nth-of-type(4){animation-delay:.12s}.card:nth-of-type(5){animation-delay:.16s}
-  .card:nth-of-type(6){animation-delay:.20s}.card:nth-of-type(7){animation-delay:.24s}
-
-  .eyebrow { font-size: 10px; font-weight: 600; color: var(--text-faint);
-             letter-spacing: 3px; text-transform: uppercase; }
-
-  /* ── Шапка ── */
-  .app-header {
-    width: min(560px, 100%);
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 4px 6px 2px;
-  }
-  .app-title { font-size: 13px; font-weight: 700; letter-spacing: 5px;
-               text-transform: uppercase; color: var(--text-dim); }
-  .app-title b { color: var(--accent); }
-  .host-chip {
-    font-family: 'JetBrains Mono', monospace; font-size: 11px;
-    color: var(--accent); background: var(--accent-soft);
-    border: 1px solid var(--line); border-radius: 999px;
-    padding: 4px 12px; letter-spacing: 0.4px;
+  .wrap {
+    width: min(940px, 100%);
+    display: flex; flex-direction: column; gap: 14px;
   }
 
-  /* ── Порядок блоков (flex order) ── */
-  .app-header    { order: 0; }
-  .clock-card    { order: 1; }
-  .weather-card  { order: 2; }
-  .stopwatch-card{ order: 3; }
-  .brightness-card { order: 4; }
-  .controls-card { order: 5; }
-  .stats-card    { order: 6; }
-  .curl-card     { order: 7; }
-  .chip-card     { order: 8; }
-  .status-bar    { order: 9; }
-
-  /* При активном секундомере он и часы меняются местами (секундомер наверх) */
-  body.sw-active .clock-card     { order: 3; }
+  /* ── Порядок блоков ── */
+  .app-header { order: 0; }
+  .clock-card { order: 2; }
+  .metric-grid{ order: 3; }
+  .stopwatch-card { order: 4; }
+  #card-system{ order: 5; }
+  #card-log   { order: 6; }
+  #card-api   { order: 7; }
+  #card-chip  { order: 8; }
+  .status-bar { order: 9; }
   body.sw-active .stopwatch-card { order: 1; }
 
-  /* …и секундомер становится крупнее (герой) */
-  body.sw-active .stopwatch-card { padding: 32px 26px 30px; }
-  body.sw-active .sw-display {
-    font-size: clamp(56px, 15vw, 104px);
-    margin: 12px 0 22px;
-    transition: font-size 0.25s ease;
+  /* ── Карточки ── */
+  .card {
+    position: relative; overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    animation: rise 0.45s cubic-bezier(.2,.7,.3,1) both;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  @keyframes rise { from { opacity:0; transform: translateY(9px); } to { opacity:1; transform:none; } }
+  .wrap > *:nth-child(2){animation-delay:.03s} .wrap > *:nth-child(3){animation-delay:.06s}
+  .wrap > *:nth-child(4){animation-delay:.09s} .wrap > *:nth-child(5){animation-delay:.12s}
+  .wrap > *:nth-child(6){animation-delay:.15s} .wrap > *:nth-child(7){animation-delay:.18s}
+
+  /* Цветная полоска сверху */
+  .card.accented::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--c), var(--c2));
+  }
+  .card.accented::after {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 130px;
+    background: radial-gradient(520px 130px at 22% -30%, var(--c-soft), transparent 70%);
+    pointer-events: none;
   }
 
+  /* ── Шапка ── */
+  .app-header { display: flex; align-items: center; justify-content: space-between;
+                gap: 12px; padding: 2px 4px; flex-wrap: wrap; }
+  .app-title { font-size: 12px; font-weight: 700; letter-spacing: 4px;
+               text-transform: uppercase; color: var(--text-dim); }
+  .app-title b { color: var(--accent); }
+  .host-chip { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+               color: var(--accent); background: var(--accent-soft);
+               border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+
   .theme-btn {
-    position: fixed; top: 16px; right: 16px;
-    width: 42px; height: 42px; border-radius: 50%;
+    position: fixed; top: 14px; right: 14px;
+    width: 40px; height: 40px; border-radius: 50%;
     background: var(--surface); border: 1px solid var(--line);
-    color: var(--accent); font-size: 18px; cursor: pointer;
+    color: var(--accent); font-size: 16px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     z-index: 50; box-shadow: var(--shadow);
     transition: transform 0.25s, border-color 0.2s;
   }
-  .theme-btn:hover { border-color: var(--accent); transform: rotate(-18deg) scale(1.05); }
+  .theme-btn:hover { border-color: var(--accent); transform: rotate(-16deg) scale(1.05); }
 
   /* ── Часы ── */
-  .clock-card { padding: 34px 26px 26px; text-align: center; overflow: hidden; }
-  .clock-card::before {
-    content: ''; position: absolute; inset: 0;
-    background: radial-gradient(420px 150px at 50% 22%, var(--accent-soft), transparent 70%);
-    pointer-events: none;
-  }
-  .clock-eyebrow { position: relative; margin-bottom: 12px; }
+  .clock-card { --c: var(--accent); --c2: var(--accent-2); --c-soft: var(--accent-soft);
+                padding: 28px 24px 22px; text-align: center; }
+  .eyebrow { position: relative; font-size: 9.5px; font-weight: 700; color: var(--text-faint);
+             letter-spacing: 2.4px; text-transform: uppercase; }
   #time {
-    position: relative;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: clamp(46px, 11vw, 88px); font-weight: 700;
-    letter-spacing: -1px; line-height: 0.98; color: var(--text);
-    white-space: nowrap;
-    text-shadow: 0 0 22px rgba(245,177,60,0.28);
+    position: relative; font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(44px, 10vw, 82px); font-weight: 700;
+    letter-spacing: -1px; line-height: 1.02; margin-top: 10px; white-space: nowrap;
   }
-  [data-theme="light"] #time { text-shadow: none; }
-  .sec-track { position: relative; height: 3px; border-radius: 3px;
-               background: var(--slider-bg); margin: 22px auto 0;
-               overflow: hidden; max-width: 340px; }
+  .sec-track { position: relative; height: 3px; border-radius: 3px; background: var(--track);
+               margin: 18px auto 0; overflow: hidden; max-width: 360px; }
   #sec-bar { height: 100%; width: 0%; border-radius: 3px;
              background: linear-gradient(90deg, var(--accent), var(--accent-2));
-             box-shadow: 0 0 10px var(--accent-soft);
              transition: width 0.9s linear; }
-  .clock-meta { position: relative; display: flex; align-items: center;
-                justify-content: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
-  #date { font-family: 'JetBrains Mono', monospace; font-size: clamp(14px,3.4vw,19px);
-          font-weight: 500; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
-  .meta-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: .7; }
-  #day { font-size: clamp(11px,2.4vw,13px); font-weight: 600; color: var(--text-faint);
-         letter-spacing: 4px; text-transform: uppercase; }
+  .clock-meta { position: relative; display: flex; align-items: center; justify-content: center;
+                gap: 11px; margin-top: 16px; flex-wrap: wrap; }
+  #date { font-family: 'JetBrains Mono', monospace; font-size: clamp(13px,3vw,17px);
+          font-weight: 500; color: var(--text-dim); letter-spacing: 1.6px; text-transform: uppercase; }
+  .meta-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: .75; }
+  #day { font-size: clamp(10px,2.2vw,12px); font-weight: 600; color: var(--text-faint);
+         letter-spacing: 3px; text-transform: uppercase; }
 
-  /* ── Секции ── */
-  .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .section-title { font-size: 11px; font-weight: 700; color: var(--text-faint);
-                   letter-spacing: 2px; text-transform: uppercase; }
+  /* ── Сетка метрик ── */
+  .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .metric-card { display: flex; flex-direction: column; gap: 13px; padding: 19px 19px 17px; }
+  .m-temp  { --c: var(--c-temp);  --c2: var(--c-temp2);  --c-soft: var(--c-temp-soft);  }
+  .m-press { --c: var(--c-press); --c2: var(--c-press2); --c-soft: var(--c-press-soft); }
+  .m-alt   { --c: var(--c-alt);   --c2: var(--c-alt2);   --c-soft: var(--c-alt-soft);   }
+  .m-fc    { --c: var(--c-fc);    --c2: var(--c-fc2);    --c-soft: var(--c-fc-soft);    }
 
-  /* ── Сворачиваемые блоки ── */
-  .section-head.toggle { cursor: pointer; user-select: none; -webkit-user-select: none; }
-  .section-head.toggle:hover .section-title { color: var(--text-dim); }
-  .section-head.toggle:hover .chevron { color: var(--accent); }
+  .m-head { position: relative; display: flex; align-items: center; gap: 9px; }
+  .m-icon { font-size: 14px; line-height: 1; filter: saturate(1.1); }
+  .m-title { font-size: 10.5px; font-weight: 700; letter-spacing: 2px;
+             text-transform: uppercase; color: var(--text-dim); }
+  .m-value { position: relative; font-family: 'JetBrains Mono', monospace;
+             font-size: clamp(38px, 7vw, 58px); font-weight: 700; line-height: 1;
+             letter-spacing: -1.5px; white-space: nowrap; }
+  .m-unit { font-size: 0.3em; font-weight: 700; color: var(--c); letter-spacing: 0;
+            margin-left: 4px; }
+  .m-desc { font-size: 13px; color: var(--text-dim); line-height: 1.45; }
+
+  /* min / avg / max */
+  .mmm { display: grid; grid-template-columns: repeat(3, 1fr);
+         background: var(--surface-2); border: 1px solid var(--line-soft);
+         border-radius: 12px; padding: 11px 6px; }
+  .mmm-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
+  .mmm-key { font-size: 9px; font-weight: 700; letter-spacing: 1.4px;
+             text-transform: uppercase; color: var(--text-faint); }
+  .mmm-val { font-family: 'JetBrains Mono', monospace; font-size: 13.5px;
+             font-weight: 600; color: var(--text); }
+  .mmm-val.avg { color: var(--c); }
+
+  /* Переключатель °C/°F */
+  .unit-row { display: flex; align-items: center; gap: 9px; }
+  .unit-lbl { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .switch { width: 44px; height: 22px; border-radius: 999px; border: 1px solid var(--line);
+            background: var(--surface-3); cursor: pointer; padding: 2px; position: relative;
+            transition: background 0.2s; }
+  .switch .knob { display: block; width: 16px; height: 16px; border-radius: 50%;
+                  background: var(--text); transition: transform 0.2s; }
+  .switch.on { background: var(--c, var(--accent)); border-color: var(--c, var(--accent)); }
+  .switch.on .knob { transform: translateX(22px); background: #fff; }
+
+  /* Пилюля-статус */
+  .pill { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+          background: var(--surface-3); border: 1px solid var(--line-soft);
+          border-radius: 999px; padding: 5px 12px; font-size: 11.5px; font-weight: 600; }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+  .pill.good  .pill-dot { background: var(--good); } .pill.good  { color: var(--good); }
+  .pill.warn  .pill-dot { background: var(--warn); } .pill.warn  { color: var(--warn); }
+  .pill.crit  .pill-dot { background: var(--crit); } .pill.crit  { color: var(--crit); }
+  .pill.info  .pill-dot { background: var(--info); } .pill.info  { color: var(--info); }
+
+  /* Спарклайн */
+  .spark-wrap { margin-top: auto; }
+  .spark-label { font-size: 9px; font-weight: 700; letter-spacing: 1.6px;
+                 text-transform: uppercase; color: var(--text-faint); margin-bottom: 7px; }
+  .spark { display: block; width: 100%; height: 48px; border-radius: 8px;
+           background: var(--surface-2); }
+  .spark-empty { height: 48px; border-radius: 8px; background: var(--surface-2);
+                 display: flex; align-items: center; justify-content: center;
+                 font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase;
+                 color: var(--text-faint); }
+
+  /* ── Панели ── */
+  .panel { padding: 19px 20px 18px; }
+  .panel > * + * { margin-top: 13px; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between;
+                gap: 12px; flex-wrap: wrap; }
+  .panel-title { font-size: 15px; font-weight: 600; letter-spacing: 0.2px; color: var(--text); }
+  .panel-head.toggle { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .panel-head.toggle:hover .chevron { color: var(--accent); }
   .chevron { font-size: 12px; color: var(--text-faint); transition: transform 0.2s, color 0.2s; }
-  .card.collapsed .section-head { margin-bottom: 0; }
   .card.collapsed .chevron { transform: rotate(-90deg); }
-  .card.collapsed > *:not(.section-head) { display: none; }
+  .card.collapsed > *:not(.panel-head) { display: none; }
 
-  /* ── Погода ── */
-  .weather-card { padding: 22px 24px; }
-  .weather-hero { display: flex; align-items: baseline; justify-content: space-between;
-                  gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-  .weather-temp { font-family: 'JetBrains Mono', monospace; font-size: clamp(36px,9vw,56px);
-                  font-weight: 700; color: var(--text); line-height: 1;
-                  text-shadow: 0 0 18px rgba(245,177,60,0.18); }
-  [data-theme="light"] .weather-temp { text-shadow: none; }
-  .weather-temp .unit { font-size: 0.38em; color: var(--text-dim); margin-left: 2px; }
-  .weather-forecast { font-size: 15px; color: var(--text-dim); font-weight: 500; }
-
-  /* ── Статистика ── */
-  .stats-card { padding: 22px 24px; }
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  /* ── Плитки ── */
+  .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .tile { background: var(--surface-2); border: 1px solid var(--line-soft);
-          border-radius: 13px; padding: 13px 15px; display: flex;
-          flex-direction: column; gap: 7px; min-width: 0; }
-  .tile.wide { grid-column: 1 / -1; }
-  .tile-label { font-size: 10px; font-weight: 700; color: var(--text-faint);
-                letter-spacing: 1.5px; text-transform: uppercase; }
-  .tile-value { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 500;
-                color: var(--text); line-height: 1.2; white-space: nowrap;
+          border-radius: 12px; padding: 12px 14px;
+          display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .tile.span2 { grid-column: span 2; }
+  .tile-label { font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+                text-transform: uppercase; color: var(--text-faint); }
+  .tile-value { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 600;
+                color: var(--text); line-height: 1.15; white-space: nowrap;
                 overflow: hidden; text-overflow: ellipsis; }
-  .unit { font-size: 12px; color: var(--text-dim); margin-left: 3px; }
+  .tile-value .u { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
+  .tile-sub { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--text-faint); }
+  .tile-row { display: flex; align-items: center; gap: 10px; }
+  .tile-split { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
-  .req-badge { display: inline-flex; align-items: center; gap: 7px; }
-  .req-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
-             flex-shrink: 0; animation: pulse-dot 2s infinite; box-shadow: 0 0 8px var(--accent); }
-  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.7)} }
+  .mini-bar { height: 5px; background: var(--track); border-radius: 3px; overflow: hidden; }
+  .mini-fill { height: 100%; width: 0%; border-radius: 3px; background: var(--good);
+               transition: width 0.8s ease, background 0.3s; }
+  .mini-fill.warn { background: var(--warn); }
+  .mini-fill.crit { background: var(--crit); }
 
-  .inline-row { display: flex; align-items: center; gap: 10px; }
-  .wifi-dots { display: inline-flex; gap: 3px; align-items: flex-end; margin-left: auto; }
-  .wifi-dots span { display: inline-block; width: 6px; border-radius: 2px; background: var(--slider-bg); transition: background 0.3s; }
-  .wifi-dots span.on { background: var(--accent); box-shadow: 0 0 6px var(--accent-soft); }
+  .wifi-bars { display: inline-flex; gap: 3px; align-items: flex-end; height: 17px; flex-shrink: 0; }
+  .wifi-bars span { width: 5px; border-radius: 2px; background: var(--track); transition: background 0.3s; }
+  .wifi-bars span.on { background: var(--good); }
 
-  .mini-bar { flex: 1; height: 5px; background: var(--slider-bg); border-radius: 3px; overflow: hidden; min-width: 40px; }
-  .cpu-mini-fill, .ram-bar-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 1s ease; }
-  .cpu-mini-fill.warn, .ram-bar-fill.warn { background: var(--warn); }
-  .cpu-mini-fill.crit, .ram-bar-fill.crit { background: var(--crit); }
-  .ram-sub { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .batt-icon { position: relative; width: 36px; height: 17px; flex-shrink: 0;
+               border: 2px solid var(--text-faint); border-radius: 4px; padding: 2px; }
+  .batt-icon::after { content: ''; position: absolute; right: -5px; top: 4.5px;
+                      width: 3px; height: 6px; background: var(--text-faint); border-radius: 0 2px 2px 0; }
+  .batt-fill { height: 100%; width: 0%; border-radius: 2px; background: var(--good);
+               transition: width 0.8s ease, background 0.3s; }
+  .batt-fill.warn { background: var(--warn); } .batt-fill.crit { background: var(--crit); }
+  .kv-big { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 600; }
+  .kv-note { font-size: 10.5px; color: var(--text-faint); }
+
+  .req-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+             flex-shrink: 0; animation: pulse-dot 2s infinite; }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(.7)} }
 
   /* ── Яркость ── */
-  .brightness-card { padding: 22px 24px; }
-  .brightness-left { display: flex; align-items: center; gap: 10px; }
-  .level-chip { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-                color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 3px 10px; }
-  .seg { display: flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--line-soft);
+  .bright-block { background: var(--surface-2); border: 1px solid var(--line-soft);
+                  border-radius: 12px; padding: 13px 15px; display: flex;
+                  flex-direction: column; gap: 12px; }
+  .bright-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .bright-left { display: flex; align-items: center; gap: 9px; }
+  .level-chip { font-size: 9.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+                color: var(--accent); background: var(--accent-soft);
+                border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; }
+  .seg { display: flex; gap: 3px; background: var(--surface-3); border: 1px solid var(--line-soft);
          border-radius: 9px; padding: 3px; }
-  .mode-btn { font-size: 11px; font-weight: 600; letter-spacing: 1px; padding: 5px 14px;
-              border-radius: 6px; border: none; background: transparent; color: var(--text-faint);
-              text-transform: uppercase; cursor: pointer; user-select: none; -webkit-user-select: none;
-              transition: background 0.15s, color 0.15s; }
-  .mode-btn.active { background: var(--accent); color: #1a1206; pointer-events: none; }
+  .mode-btn { font-family: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: 0.8px;
+              padding: 5px 13px; border-radius: 6px; border: none; background: transparent;
+              color: var(--text-faint); text-transform: uppercase; cursor: pointer;
+              user-select: none; -webkit-user-select: none; transition: background 0.15s, color 0.15s; }
+  .mode-btn.active { background: var(--accent); color: #fff; pointer-events: none; }
   .mode-btn:not(.active):hover { color: var(--text-dim); }
 
-  .slider-row { display: flex; align-items: center; gap: 14px; }
-  .brightness-icon { font-size: 14px; flex-shrink: 0; opacity: 0.65; }
+  .slider-row { display: flex; align-items: center; gap: 12px; }
+  .slider-ico { font-size: 13px; flex-shrink: 0; opacity: 0.6; }
   input[type="range"] {
     -webkit-appearance: none; appearance: none; flex: 1; height: 6px; border-radius: 3px; outline: none;
-    background: linear-gradient(var(--accent), var(--accent)) 0/50% 100% no-repeat, var(--slider-bg);
-    cursor: pointer; transition: opacity 0.2s;
+    background: linear-gradient(var(--accent), var(--accent)) 0/50% 100% no-repeat, var(--track);
+    cursor: pointer; transition: opacity 0.2s; min-width: 60px;
   }
   input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%;
-    background: var(--accent-2); border: 2px solid var(--accent);
-    box-shadow: 0 0 10px var(--accent-soft); cursor: pointer; transition: transform 0.15s;
+    -webkit-appearance: none; appearance: none; width: 17px; height: 17px; border-radius: 50%;
+    background: #fff; border: 3px solid var(--accent); cursor: pointer; transition: transform 0.15s;
   }
-  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.18); }
-  input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%;
-    background: var(--accent-2); border: 2px solid var(--accent); cursor: pointer; }
-  input[type="range"].disabled-slider { opacity: 0.3; pointer-events: none; cursor: not-allowed; }
-  .brightness-val { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600;
-                    color: var(--text); min-width: 42px; text-align: right; }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  input[type="range"]::-moz-range-thumb { width: 17px; height: 17px; border-radius: 50%;
+    background: #fff; border: 3px solid var(--accent); cursor: pointer; }
+  input[type="range"].disabled-slider { opacity: 0.3; pointer-events: none; }
+  .bright-val { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+                min-width: 44px; text-align: right; }
 
-  /* ── Управление ── */
-  .controls-card { padding: 18px 24px; display: flex; align-items: center;
-                   justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-  .controls-left { display: flex; flex-direction: column; gap: 4px; }
-  .controls-label { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1.5px; text-transform: uppercase; }
-  #uptime-label { font-family: 'JetBrains Mono', monospace; font-size: 18px; color: var(--text); }
-  .controls-right { display: flex; gap: 10px; flex-shrink: 0; }
-  .btn-action { font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700;
-                letter-spacing: 0.6px; padding: 11px 18px; border-radius: 11px; cursor: pointer;
-                text-transform: uppercase; white-space: nowrap; border: 1px solid var(--line);
-                background: var(--surface-2); color: var(--text-dim);
-                transition: background 0.2s, border-color 0.2s, color 0.2s; }
+  /* ── Кнопки действий ── */
+  .btn-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .btn-action { font-family: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: 0.2px;
+                padding: 12px 14px; border-radius: 11px; cursor: pointer; white-space: nowrap;
+                border: 1px solid var(--line); background: var(--surface-2); color: var(--text-dim);
+                transition: background 0.18s, border-color 0.18s, color 0.18s; }
+  .btn-action:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
   .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-power.on { border-color: var(--good); color: var(--good); }
-  .btn-power.off { border-color: var(--crit); color: var(--crit); }
-  .btn-power.on:hover:not(:disabled) { background: var(--good); color: #08130c; }
-  .btn-power.off:hover:not(:disabled) { background: var(--crit); color: #1a0805; }
-  .btn-reboot:hover:not(:disabled) { background: var(--crit); border-color: var(--crit); color: #1a0805; }
+  .btn-power.on  { border-color: rgba(92,195,137,0.45); color: var(--good); }
+  .btn-power.off { border-color: rgba(239,106,85,0.45); color: var(--crit); }
+  .btn-power.on:hover:not(:disabled)  { background: var(--good); border-color: var(--good); color: #06130c; }
+  .btn-power.off:hover:not(:disabled) { background: var(--crit); border-color: var(--crit); color: #1a0705; }
+  .btn-reboot:hover:not(:disabled) { background: var(--crit); border-color: var(--crit); color: #1a0705; }
 
   /* ── Секундомер ── */
-  .stopwatch-card { padding: 22px 24px; }
-  .sw-sync { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); }
-  .sw-display { font-family: 'JetBrains Mono', monospace; font-size: clamp(34px,8vw,60px);
-                font-weight: 700; letter-spacing: 2px; text-align: center; color: var(--text);
-                line-height: 1; margin: 6px 0 18px; text-shadow: 0 0 18px rgba(245,177,60,0.18); }
-  [data-theme="light"] .sw-display { text-shadow: none; }
-  .sw-display .sw-ms { font-size: 0.42em; color: var(--accent); vertical-align: baseline; }
+  .stopwatch-card { --c: var(--accent); --c2: var(--accent-2); --c-soft: var(--accent-soft);
+                    padding: 19px 20px 18px; }
+  .sw-sync { font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-faint); }
+  .sw-display { font-family: 'JetBrains Mono', monospace; font-size: clamp(34px,8vw,58px);
+                font-weight: 700; letter-spacing: 1px; text-align: center; line-height: 1;
+                margin: 14px 0 16px; }
+  .sw-display .sw-ms { font-size: 0.42em; color: var(--accent); }
+  body.sw-active .stopwatch-card { padding: 28px 24px 24px; }
+  body.sw-active .sw-display { font-size: clamp(52px, 14vw, 96px); margin: 18px 0 22px; }
   .sw-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .sw-btn { font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700;
-            letter-spacing: 0.6px; padding: 11px 22px; border-radius: 11px; cursor: pointer;
-            text-transform: uppercase; white-space: nowrap; border: 1px solid var(--line);
-            background: var(--surface-2); color: var(--text-dim); min-width: 92px;
-            transition: background 0.2s, border-color 0.2s, color 0.2s; }
+  .sw-btn { font-family: inherit; font-size: 12.5px; font-weight: 600; padding: 11px 22px;
+            border-radius: 11px; cursor: pointer; white-space: nowrap; min-width: 96px;
+            border: 1px solid var(--line); background: var(--surface-2); color: var(--text-dim);
+            transition: background 0.18s, border-color 0.18s, color 0.18s; }
   .sw-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  #sw-start-btn { border-color: var(--good); color: var(--good); }
-  #sw-start-btn:hover { background: var(--good); color: #08130c; }
-  #sw-start-btn.running { border-color: var(--warn); color: var(--warn); }
-  #sw-start-btn.running:hover { background: var(--warn); color: #1a1206; }
-  #sw-reset-btn:hover:not(:disabled), #sw-lap-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .sw-laps { margin-top: 16px; max-height: 168px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
-  .sw-lap-item { display: flex; align-items: center; justify-content: space-between;
-                 font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 6px 12px;
-                 border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); }
-  .sw-lap-num { color: var(--text-faint); font-size: 11px; }
-  .sw-lap-time { color: var(--text); }
-  .sw-lap-delta { color: var(--accent); font-size: 11px; }
+  #sw-start-btn { border-color: rgba(92,195,137,0.45); color: var(--good); }
+  #sw-start-btn:hover { background: var(--good); border-color: var(--good); color: #06130c; }
+  #sw-start-btn.running { border-color: rgba(233,165,74,0.5); color: var(--warn); }
+  #sw-start-btn.running:hover { background: var(--warn); border-color: var(--warn); color: #1a1206; }
+  #sw-reset-btn:hover:not(:disabled), #sw-lap-btn:hover:not(:disabled) {
+    border-color: var(--accent); color: var(--accent); }
+  .sw-laps { margin-top: 14px; max-height: 168px; overflow-y: auto;
+             display: flex; flex-direction: column; gap: 5px; }
   .sw-laps:empty { display: none; }
+  .sw-lap-item { display: flex; align-items: center; justify-content: space-between;
+                 font-family: 'JetBrains Mono', monospace; font-size: 12.5px; padding: 7px 12px;
+                 border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line-soft); }
+  .sw-lap-num { color: var(--text-faint); font-size: 10.5px; }
+  .sw-lap-delta { color: var(--accent); font-size: 10.5px; }
+
+  /* ── Лог событий ── */
+  .log-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .log-conn { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+  .log-count { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--text-faint); }
+  .log-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .log-chip { display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+              font-size: 9.5px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+              padding: 5px 12px; border-radius: 999px; cursor: pointer;
+              border: 1px solid var(--line-soft); background: var(--surface-2);
+              color: var(--text-faint); opacity: 0.5; transition: opacity 0.15s, color 0.15s; }
+  .log-chip.on { opacity: 1; color: var(--text-dim); background: var(--surface-3); }
+  .cdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .log-chip[data-lvl="error"] .cdot { background: var(--crit); }
+  .log-chip[data-lvl="warn"]  .cdot { background: var(--warn); }
+  .log-chip[data-lvl="info"]  .cdot { background: var(--info); }
+  .log-chip[data-lvl="ok"]    .cdot { background: var(--good); }
+  .log-body { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 12px;
+              padding: 10px 12px; max-height: 230px; overflow-y: auto;
+              font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.7; }
+  .log-line { display: flex; gap: 10px; align-items: baseline; }
+  .log-ts { color: var(--text-faint); flex-shrink: 0; }
+  .log-lvl { flex-shrink: 0; width: 42px; font-weight: 700; font-size: 10px; letter-spacing: 0.5px; }
+  .log-msg { color: var(--text-dim); word-break: break-word; }
+  .lvl-error .log-lvl { color: var(--crit); } .lvl-error .log-msg { color: var(--crit); }
+  .lvl-warn  .log-lvl { color: var(--warn); }
+  .lvl-info  .log-lvl { color: var(--info); }
+  .lvl-ok    .log-lvl { color: var(--good); }
+  .log-body.hide-error .lvl-error, .log-body.hide-warn .lvl-warn,
+  .log-body.hide-info  .lvl-info,  .log-body.hide-ok   .lvl-ok { display: none; }
 
   /* ── curl ── */
-  .curl-card { padding: 20px 24px; }
-  .curl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .curl-line { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--code);
-               flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: all;
-               background: var(--surface-2); border: 1px solid var(--line-soft);
-               border-radius: 8px; padding: 8px 11px; }
-  .curl-copy { flex-shrink: 0; padding: 6px 11px; border-radius: 7px; font-size: 10px; font-weight: 700;
-               letter-spacing: 0.6px; border: 1px solid var(--line); background: var(--surface-2);
-               color: var(--text-faint); cursor: pointer; text-transform: uppercase;
-               font-family: 'Space Grotesk', sans-serif;
-               transition: border-color 0.15s, color 0.15s; }
+  .curl-row { display: flex; align-items: center; gap: 9px; }
+  .panel .curl-row + .curl-row { margin-top: 8px; }
+  .curl-line { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--code);
+               flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+               user-select: all; background: var(--surface-2); border: 1px solid var(--line-soft);
+               border-radius: 9px; padding: 9px 11px; }
+  .curl-copy { flex-shrink: 0; font-family: inherit; padding: 7px 12px; border-radius: 8px;
+               font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+               border: 1px solid var(--line); background: var(--surface-2); color: var(--text-faint);
+               cursor: pointer; transition: border-color 0.15s, color 0.15s; }
   .curl-copy:hover { border-color: var(--accent); color: var(--accent); }
   .curl-copy.copied { border-color: var(--good); color: var(--good); }
-  .curl-note { font-family: 'JetBrains Mono', monospace; color: var(--text-faint); font-size: 11px; margin-top: 6px; }
+  .curl-note { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--text-faint); }
 
   /* ── Chip info ── */
-  .chip-card { padding: 20px 24px; }
-  .chip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }
-  .chip-item { display: flex; flex-direction: column; gap: 3px; }
-  .chip-key { font-size: 10px; font-weight: 700; color: var(--text-faint); letter-spacing: 1px; text-transform: uppercase; }
-  .chip-val { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text); }
+  .chip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px 20px; }
+  .chip-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .chip-key { font-size: 9px; font-weight: 700; letter-spacing: 1.3px;
+              text-transform: uppercase; color: var(--text-faint); }
+  .chip-val { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--text); }
 
   /* ── Статус / toast ── */
-  .status-bar { display: flex; align-items: center; gap: 14px; font-size: 11px; font-weight: 500;
-                color: var(--text-faint); letter-spacing: 1.5px; margin-top: 4px; }
-  .ws-indicator { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
-  .ws-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); transition: background 0.3s; }
-  .ws-dot.connected { background: var(--good); animation: pulse 2s infinite; box-shadow: 0 0 8px var(--good); }
+  .status-bar { display: flex; align-items: center; gap: 12px; padding: 0 4px;
+                font-size: 10.5px; color: var(--text-faint); letter-spacing: 1.2px; }
+  .ws-indicator { display: inline-flex; align-items: center; gap: 7px;
+                  text-transform: uppercase; }
+  .ws-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint);
+            flex-shrink: 0; transition: background 0.3s; }
+  .ws-dot.connected { background: var(--good); animation: pulse 2s infinite; }
   .ws-dot.disconnected { background: var(--crit); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
            background: var(--surface); border: 1px solid var(--accent); color: var(--text);
-           font-size: 14px; font-weight: 500; padding: 13px 24px; border-radius: 12px;
+           font-size: 13.5px; font-weight: 500; padding: 12px 22px; border-radius: 12px;
            box-shadow: var(--shadow); opacity: 0; transition: opacity 0.3s;
            pointer-events: none; white-space: nowrap; z-index: 100; }
   .toast.show { opacity: 1; }
 
-  @media (max-width: 420px) {
-    .stat-grid { grid-template-columns: 1fr; }
-    .chip-grid { grid-template-columns: 1fr; }
+  @media (max-width: 720px) {
+    .metric-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .tile.span2 { grid-column: span 1; }
+    .tile-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   }
   @media (prefers-reduced-motion: reduce) {
     *, .card { animation: none !important; transition: none !important; }
@@ -358,218 +450,304 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
 
-<div class="app-header">
-  <div class="app-title">ESP32 <b>CLOCK</b></div>
-  <div class="host-chip" id="host-chip">clock.local</div>
-</div>
+<div class="wrap">
 
-<!-- Часы -->
-<div class="card clock-card">
-  <div class="eyebrow clock-eyebrow">Local time</div>
-  <div id="time">--:--:--</div>
-  <div class="sec-track"><div id="sec-bar"></div></div>
-  <div class="clock-meta">
-    <span id="date">-- --- ----</span>
-    <span class="meta-dot"></span>
-    <span id="day">---------</span>
+  <div class="app-header">
+    <div class="app-title">ESP32 <b>CLOCK</b></div>
+    <div class="host-chip" id="host-chip">clock.local</div>
   </div>
-</div>
 
-<!-- Погода -->
-<div class="card weather-card" id="card-weather">
-  <div class="section-head toggle" onclick="toggleCard('card-weather')">
-    <div class="section-title">Weather · BMP280</div>
-    <span class="chevron">▾</span>
-  </div>
-  <div class="weather-hero">
-    <div class="weather-temp"><span id="w-temp">—</span><span class="unit">°C</span></div>
-    <div class="weather-forecast"><span id="w-forecast-emoji">—</span> <span id="w-forecast">—</span></div>
-  </div>
-  <div class="stat-grid">
-    <div class="tile">
-      <div class="tile-label">Pressure</div>
-      <div class="tile-value"><span id="w-pressure">—</span><span class="unit">hPa</span></div>
-      <div class="ram-sub"><span id="w-pressure-mmhg">—</span> mmHg</div>
+  <!-- ── Часы ── -->
+  <div class="card accented clock-card">
+    <div class="eyebrow">Local time</div>
+    <div id="time">--:--:--</div>
+    <div class="sec-track"><div id="sec-bar"></div></div>
+    <div class="clock-meta">
+      <span id="date">-- --- ----</span>
+      <span class="meta-dot"></span>
+      <span id="day">---------</span>
     </div>
-    <div class="tile">
-      <div class="tile-label">Altitude</div>
-      <div class="tile-value"><span id="w-altitude">—</span><span class="unit">m</span></div>
-      <div class="ram-sub">trend <span id="w-trend">—</span> hPa/h</div>
+  </div>
+
+  <!-- ── Метрики ── -->
+  <div class="metric-grid">
+
+    <!-- Температура -->
+    <div class="card accented metric-card m-temp">
+      <div class="m-head"><span class="m-icon">🌡️</span><span class="m-title">Temperature</span></div>
+      <div class="m-value"><span id="mt-val">—</span><span class="m-unit" id="mt-unit">°C</span></div>
+      <div class="mmm">
+        <div class="mmm-cell"><span class="mmm-key">Min</span><span class="mmm-val" id="mt-min">—</span></div>
+        <div class="mmm-cell"><span class="mmm-key">Avg</span><span class="mmm-val avg" id="mt-avg">—</span></div>
+        <div class="mmm-cell"><span class="mmm-key">Max</span><span class="mmm-val" id="mt-max">—</span></div>
+      </div>
+      <div class="unit-row">
+        <span class="unit-lbl">°C</span>
+        <button class="switch" id="unit-switch" onclick="toggleUnit()" role="switch" aria-label="Temperature unit"><span class="knob"></span></button>
+        <span class="unit-lbl">°F</span>
+      </div>
+      <div class="pill" id="mt-pill"><span class="pill-dot"></span><span id="mt-pill-txt">—</span></div>
+      <div class="spark-wrap">
+        <div class="spark-label">Trend</div>
+        <div id="spark-temp-box"><div class="spark-empty">collecting…</div></div>
+      </div>
     </div>
-    <div class="tile wide" id="tile-battery">
+
+    <!-- Давление -->
+    <div class="card accented metric-card m-press">
+      <div class="m-head"><span class="m-icon">🌀</span><span class="m-title">Pressure</span></div>
+      <div class="m-value"><span id="mp-val">—</span><span class="m-unit">hPa</span></div>
+      <div class="mmm">
+        <div class="mmm-cell"><span class="mmm-key">Min</span><span class="mmm-val" id="mp-min">—</span></div>
+        <div class="mmm-cell"><span class="mmm-key">Avg</span><span class="mmm-val avg" id="mp-avg">—</span></div>
+        <div class="mmm-cell"><span class="mmm-key">Max</span><span class="mmm-val" id="mp-max">—</span></div>
+      </div>
+      <div class="pill" id="mp-pill"><span class="pill-dot"></span><span id="mp-pill-txt">—</span></div>
+      <div class="spark-wrap">
+        <div class="spark-label">Trend</div>
+        <div id="spark-press-box"><div class="spark-empty">collecting…</div></div>
+      </div>
+    </div>
+
+    <!-- Высота -->
+    <div class="card accented metric-card m-alt">
+      <div class="m-head"><span class="m-icon">⛰️</span><span class="m-title">Altitude</span></div>
+      <div class="m-value"><span id="ma-val">—</span><span class="m-unit">m</span></div>
+      <div class="m-desc">Estimated from pressure relative to sea level</div>
+      <div class="spark-wrap">
+        <div class="spark-label">Trend</div>
+        <div id="spark-alt-box"><div class="spark-empty">collecting…</div></div>
+      </div>
+    </div>
+
+    <!-- Прогноз / барический тренд -->
+    <div class="card accented metric-card m-fc">
+      <div class="m-head"><span class="m-icon">📈</span><span class="m-title">Pressure trend</span></div>
+      <div class="m-value"><span id="mf-val">—</span><span class="m-unit">hPa/h</span></div>
+      <div class="m-desc" id="mf-desc">Barometric change over the last hour</div>
+      <div class="pill" id="mf-pill"><span class="pill-dot"></span><span id="mf-pill-txt">—</span></div>
+      <div class="spark-wrap">
+        <div class="spark-label">Trend</div>
+        <div id="spark-fc-box"><div class="spark-empty">collecting…</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Секундомер ── -->
+  <div class="card accented stopwatch-card">
+    <div class="panel-head">
+      <div class="panel-title">Stopwatch</div>
+      <span class="sw-sync" id="sw-sync">synced with device</span>
+    </div>
+    <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
+    <div class="sw-controls">
+      <button class="sw-btn" id="sw-start-btn" onclick="swToggle()">Start</button>
+      <button class="sw-btn" id="sw-lap-btn"   onclick="swLap()" disabled>Lap</button>
+      <button class="sw-btn" id="sw-reset-btn" onclick="swReset()">Reset</button>
+    </div>
+    <div class="sw-laps" id="sw-laps"></div>
+  </div>
+
+  <!-- ── Система и управление ── -->
+  <div class="card panel" id="card-system">
+    <div class="panel-head toggle" onclick="toggleCard('card-system')">
+      <div class="panel-title">System &amp; control</div>
+      <span class="chevron">▾</span>
+    </div>
+
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-label">Uptime</div>
+        <div class="tile-value" id="uptime-label">—</div>
+      </div>
+      <div class="tile span2">
+        <div class="tile-label">RAM</div>
+        <div class="tile-value"><span id="ram-val">—</span><span class="u">KB</span></div>
+        <div class="mini-bar"><div class="mini-fill" id="ram-bar"></div></div>
+        <div class="tile-split">
+          <span class="tile-sub" id="ram-used">—</span>
+          <span class="tile-sub" id="ram-free">—</span>
+        </div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Requests</div>
+        <div class="tile-row">
+          <span class="req-dot"></span>
+          <div class="tile-value" id="req-count">—</div>
+        </div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Clients</div>
+        <div class="tile-value" id="clients-val">—</div>
+        <div class="tile-sub">viewing now</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Chip temp</div>
+        <div class="tile-value"><span id="chip-temp">—</span><span class="u" id="chip-temp-unit">°C</span></div>
+      </div>
+    </div>
+
+    <div class="tile" id="bat-tile">
       <div class="tile-label">Battery</div>
-      <div class="inline-row">
-        <div class="tile-value"><span id="w-bat-pct">—</span><span class="unit">%</span></div>
-        <div class="mini-bar"><div class="ram-bar-fill" id="w-bat-bar" style="width:0%"></div></div>
-        <div class="ram-sub" style="margin-left:auto"><span id="w-bat-v">—</span> V</div>
+      <div class="tile-split">
+        <div class="tile-row">
+          <div class="batt-icon"><div class="batt-fill" id="bat-fill"></div></div>
+          <div>
+            <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
+            <div class="kv-note">battery</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="kv-big"><span id="bat-v">—</span><span class="u">V</span></div>
+          <div class="kv-note">voltage</div>
+        </div>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- Секундомер -->
-<div class="card stopwatch-card">
-  <div class="section-head">
-    <div class="section-title">Stopwatch</div>
-    <span class="sw-sync" id="sw-sync">synced with device</span>
-  </div>
-  <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
-  <div class="sw-controls">
-    <button class="sw-btn" id="sw-start-btn" onclick="swToggle()">Start</button>
-    <button class="sw-btn" id="sw-lap-btn"   onclick="swLap()"    disabled>Lap</button>
-    <button class="sw-btn" id="sw-reset-btn" onclick="swReset()">Reset</button>
-  </div>
-  <div class="sw-laps" id="sw-laps"></div>
-</div>
-
-<!-- Яркость -->
-<div class="card brightness-card">
-  <div class="section-head">
-    <div class="brightness-left">
-      <div class="section-title">Brightness</div>
-      <span class="level-chip" id="bright-label">—</span>
-    </div>
-    <div class="seg">
-      <button class="mode-btn active" id="btn-auto"   onclick="setBrightnessMode('auto')">Auto</button>
-      <button class="mode-btn"        id="btn-manual" onclick="setBrightnessMode('manual')">Manual</button>
-    </div>
-  </div>
-  <div class="slider-row">
-    <span class="brightness-icon">🌑</span>
-    <input type="range" id="brightness-slider" min="0" max="100" value="50"
-           class="disabled-slider"
-           oninput="onSliderInput(this.value)" onchange="sendBrightness(this.value)">
-    <span class="brightness-icon">☀️</span>
-    <span class="brightness-val"><span id="brightness-pct">—</span>%</span>
-  </div>
-</div>
-
-<!-- Управление -->
-<div class="card controls-card">
-  <div class="controls-left">
-    <div class="controls-label">Uptime</div>
-    <div id="uptime-label">—</div>
-  </div>
-  <div class="controls-right">
-    <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display On</button>
-    <button class="btn-action btn-reboot"   id="btn-reboot" onclick="doReboot()">Reboot</button>
-  </div>
-</div>
-
-<!-- Статистика -->
-<div class="card stats-card" id="card-stats">
-  <div class="section-head toggle" onclick="toggleCard('card-stats')">
-    <div class="section-title">Device stats</div>
-    <span class="chevron">▾</span>
-  </div>
-  <div class="stat-grid">
-    <div class="tile">
-      <div class="tile-label">Die temp</div>
-      <div class="tile-value"><span id="temp">—</span><span class="unit">°C</span></div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">Clients</div>
-      <div class="inline-row">
-        <div class="tile-value"><span id="clients-val">—</span></div>
-        <span class="unit" style="align-self:center">viewing now</span>
+    <div class="tile-grid">
+      <div class="tile">
+        <div class="tile-label">SSID</div>
+        <div class="tile-value" id="ssid">—</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">WiFi signal</div>
+        <div class="tile-row">
+          <span class="wifi-bars">
+            <span id="d1" style="height:5px"></span>
+            <span id="d2" style="height:9px"></span>
+            <span id="d3" style="height:13px"></span>
+            <span id="d4" style="height:17px"></span>
+          </span>
+          <div class="tile-value"><span id="rssi-val">—</span><span class="u">dBm</span></div>
+        </div>
+        <div class="tile-sub" id="rssi-quality">—</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">IP address</div>
+        <div class="tile-value" id="ip">—</div>
       </div>
     </div>
-    <div class="tile">
-      <div class="tile-label">WiFi SSID</div>
-      <div class="tile-value" id="ssid">—</div>
-    </div>
-    <div class="tile">
-      <div class="tile-label">IP address</div>
-      <div class="tile-value" id="ip">—</div>
-    </div>
-    <div class="tile wide">
-      <div class="tile-label">WiFi signal</div>
-      <div class="inline-row">
-        <div class="tile-value"><span id="rssi-val">—</span><span class="unit">dBm</span></div>
-        <span class="wifi-dots">
-          <span id="d1" style="height:5px"></span>
-          <span id="d2" style="height:8px"></span>
-          <span id="d3" style="height:12px"></span>
-          <span id="d4" style="height:16px"></span>
-        </span>
+
+    <div class="bright-block">
+      <div class="bright-top">
+        <div class="bright-left">
+          <div class="tile-label">Display brightness</div>
+          <span class="level-chip" id="bright-label">—</span>
+        </div>
+        <div class="seg">
+          <button class="mode-btn active" id="btn-auto"   onclick="setBrightnessMode('auto')">Auto</button>
+          <button class="mode-btn"        id="btn-manual" onclick="setBrightnessMode('manual')">Manual</button>
+        </div>
+      </div>
+      <div class="slider-row">
+        <span class="slider-ico">🌑</span>
+        <input type="range" id="brightness-slider" min="0" max="100" value="50"
+               class="disabled-slider"
+               oninput="onSliderInput(this.value)" onchange="sendBrightness(this.value)">
+        <span class="slider-ico">☀️</span>
+        <span class="bright-val"><span id="brightness-pct">—</span>%</span>
       </div>
     </div>
-    <div class="tile wide">
-      <div class="tile-label">RAM</div>
-      <div class="inline-row">
-        <div class="mini-bar"><div class="ram-bar-fill" id="ram-bar" style="width:0%"></div></div>
+
+    <div class="btn-row">
+      <button class="btn-action" onclick="exportCsv()">Export CSV</button>
+      <button class="btn-action" onclick="exportJson()">Export JSON</button>
+      <button class="btn-action" onclick="resetStats()">Reset min/max</button>
+      <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display on</button>
+      <button class="btn-action btn-reboot" id="btn-reboot" onclick="doReboot()">Reboot</button>
+    </div>
+  </div>
+
+  <!-- ── Лог событий ── -->
+  <div class="card panel" id="card-log">
+    <div class="panel-head">
+      <div class="log-left">
+        <div class="panel-title">Event log</div>
+        <span class="log-conn"><span class="ws-dot" id="log-dot"></span><span id="log-conn-label">Connecting</span></span>
       </div>
-      <div class="ram-sub" id="ram-txt">—</div>
+      <span class="log-count"><span id="log-count">0</span>/500 lines</span>
     </div>
-    <div class="tile wide">
-      <div class="tile-label">Requests since boot</div>
-      <div class="tile-value"><span class="req-badge"><span class="req-dot"></span><span id="req-count">—</span></span></div>
+    <div class="log-chips">
+      <button class="log-chip on" data-lvl="error" onclick="toggleLvl(this)"><span class="cdot"></span>Error</button>
+      <button class="log-chip on" data-lvl="warn"  onclick="toggleLvl(this)"><span class="cdot"></span>Warn</button>
+      <button class="log-chip on" data-lvl="info"  onclick="toggleLvl(this)"><span class="cdot"></span>Info</button>
+      <button class="log-chip on" data-lvl="ok"    onclick="toggleLvl(this)"><span class="cdot"></span>Ok</button>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </div>
+
+  <!-- ── curl ── -->
+  <div class="card panel" id="card-api">
+    <div class="panel-head toggle" onclick="toggleCard('card-api')">
+      <div class="panel-title">API · curl</div>
+      <span class="chevron">▾</span>
+    </div>
+    <div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-root" data-cmd="curl http://{ip}/">curl http://&lt;IP&gt;/</code>
+        <button class="curl-copy" onclick="copyCmd('curl-root',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-stats" data-cmd="curl http://{ip}/api/stats">curl http://&lt;IP&gt;/api/stats</code>
+        <button class="curl-copy" onclick="copyCmd('curl-stats',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-time" data-cmd="curl http://{ip}/api/time">curl http://&lt;IP&gt;/api/time</code>
+        <button class="curl-copy" onclick="copyCmd('curl-time',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-weather" data-cmd="curl http://{ip}/api/weather">curl http://&lt;IP&gt;/api/weather</code>
+        <button class="curl-copy" onclick="copyCmd('curl-weather',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-bright" data-cmd='curl -X POST http://{ip}/api/brightness -d "value=80"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "value=80"</code>
+        <button class="curl-copy" onclick="copyCmd('curl-bright',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-bright-auto" data-cmd='curl -X POST http://{ip}/api/brightness -d "auto=1"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "auto=1"</code>
+        <button class="curl-copy" onclick="copyCmd('curl-bright-auto',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-power-off" data-cmd='curl -X POST http://{ip}/api/power -d "on=0"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=0"</code>
+        <button class="curl-copy" onclick="copyCmd('curl-power-off',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-power-on" data-cmd='curl -X POST http://{ip}/api/power -d "on=1"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=1"</code>
+        <button class="curl-copy" onclick="copyCmd('curl-power-on',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-reboot" data-cmd="curl -X POST http://{ip}/api/reboot">curl -X POST http://&lt;IP&gt;/api/reboot</code>
+        <button class="curl-copy" onclick="copyCmd('curl-reboot',this)">copy</button>
+      </div>
+    </div>
+    <div class="curl-note"># WebSocket ws://&lt;IP&gt;:81 — stopwatch: send text "sw:start" / "sw:pause" / "sw:reset"</div>
+  </div>
+
+  <!-- ── Chip info ── -->
+  <div class="card panel" id="card-chip">
+    <div class="panel-head toggle" onclick="toggleCard('card-chip')">
+      <div class="panel-title">Microcontroller · ESP32-C6-Zero</div>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="chip-grid">
+      <div class="chip-item"><span class="chip-key">Architecture</span><span class="chip-val">RISC-V 32-bit</span></div>
+      <div class="chip-item"><span class="chip-key">Core / Freq</span><span class="chip-val">1x up to 160 MHz</span></div>
+      <div class="chip-item"><span class="chip-key">Flash</span><span class="chip-val">4 MB</span></div>
+      <div class="chip-item"><span class="chip-key">SRAM</span><span class="chip-val">512 KB</span></div>
+      <div class="chip-item"><span class="chip-key">WiFi</span><span class="chip-val">WiFi 6 (2.4 GHz)</span></div>
+      <div class="chip-item"><span class="chip-key">Bluetooth</span><span class="chip-val">BLE 5 + Zigbee/Thread</span></div>
+      <div class="chip-item"><span class="chip-key">Display</span><span class="chip-val">SSD1322 256x64 SPI</span></div>
+      <div class="chip-item"><span class="chip-key">Sensor</span><span class="chip-val">BMP280 I2C</span></div>
     </div>
   </div>
+
+  <div class="status-bar">
+    <span class="ws-indicator"><span class="ws-dot" id="ws-dot"></span><span id="ws-label">Connecting</span></span>
+  </div>
+
 </div>
 
-<!-- curl -->
-<div class="card curl-card" id="card-api">
-  <div class="section-head toggle" onclick="toggleCard('card-api')">
-    <div class="section-title">API · curl</div>
-    <span class="chevron">▾</span>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-root"      data-cmd="curl http://{ip}/">curl http://&lt;IP&gt;/</code>
-    <button class="curl-copy" onclick="copyCmd('curl-root',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-stats"     data-cmd="curl http://{ip}/api/stats">curl http://&lt;IP&gt;/api/stats</code>
-    <button class="curl-copy" onclick="copyCmd('curl-stats',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-time"      data-cmd="curl http://{ip}/api/time">curl http://&lt;IP&gt;/api/time</code>
-    <button class="curl-copy" onclick="copyCmd('curl-time',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-bright"    data-cmd='curl -X POST http://{ip}/api/brightness -d "value=80"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "value=80"</code>
-    <button class="curl-copy" onclick="copyCmd('curl-bright',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-bright-auto" data-cmd='curl -X POST http://{ip}/api/brightness -d "auto=1"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "auto=1"</code>
-    <button class="curl-copy" onclick="copyCmd('curl-bright-auto',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-power-off" data-cmd='curl -X POST http://{ip}/api/power -d "on=0"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=0"</code>
-    <button class="curl-copy" onclick="copyCmd('curl-power-off',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-power-on"  data-cmd='curl -X POST http://{ip}/api/power -d "on=1"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=1"</code>
-    <button class="curl-copy" onclick="copyCmd('curl-power-on',this)">copy</button>
-  </div>
-  <div class="curl-row">
-    <code class="curl-line" id="curl-reboot"    data-cmd="curl -X POST http://{ip}/api/reboot">curl -X POST http://&lt;IP&gt;/api/reboot</code>
-    <button class="curl-copy" onclick="copyCmd('curl-reboot',this)">copy</button>
-  </div>
-  <div class="curl-note"># WebSocket ws://&lt;IP&gt;:81 — stopwatch: send text "sw:start" / "sw:pause" / "sw:reset"</div>
-</div>
-
-<!-- Chip info -->
-<div class="card chip-card" id="card-chip">
-  <div class="section-head toggle" onclick="toggleCard('card-chip')">
-    <div class="section-title">Microcontroller · ESP32-C6-Zero</div>
-    <span class="chevron">▾</span>
-  </div>
-  <div class="chip-grid">
-    <div class="chip-item"><span class="chip-key">Architecture</span><span class="chip-val">RISC-V 32-bit</span></div>
-    <div class="chip-item"><span class="chip-key">Core / Freq</span><span class="chip-val">1x up to 160 MHz</span></div>
-    <div class="chip-item"><span class="chip-key">Flash</span><span class="chip-val">4 MB</span></div>
-    <div class="chip-item"><span class="chip-key">SRAM</span><span class="chip-val">512 KB</span></div>
-    <div class="chip-item"><span class="chip-key">WiFi</span><span class="chip-val">WiFi 6 (2.4 GHz)</span></div>
-    <div class="chip-item"><span class="chip-key">Bluetooth</span><span class="chip-val">BLE 5 + Zigbee/Thread</span></div>
-    <div class="chip-item"><span class="chip-key">Display</span><span class="chip-val">SSD1322 256x64 SPI</span></div>
-    <div class="chip-item"><span class="chip-key">Protocol</span><span class="chip-val">REST + WebSocket :81</span></div>
-  </div>
-</div>
-
-<div class="status-bar">
-  <span class="ws-indicator"><span class="ws-dot" id="ws-dot"></span><span id="ws-label">CONNECTING</span></span>
-</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -585,7 +763,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     localStorage.setItem('theme', next);
   }
 
-  // Показываем реальный хост в чипе (clock.local или IP)
   document.getElementById('host-chip').textContent = location.hostname || 'clock.local';
 
   // ── Сворачивание блоков ──────────────────────────────
@@ -595,7 +772,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     card.classList.toggle('collapsed');
     try { localStorage.setItem('collapsed:' + id, card.classList.contains('collapsed') ? '1' : '0'); } catch(e) {}
   }
-  ['card-weather', 'card-stats', 'card-api', 'card-chip'].forEach(function(id) {
+  ['card-system', 'card-log', 'card-api', 'card-chip'].forEach(function(id) {
     try {
       if (localStorage.getItem('collapsed:' + id) === '1')
         document.getElementById(id).classList.add('collapsed');
@@ -607,18 +784,124 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let isDisplayOn       = true;
   let isDragging        = false;
   let modeChangePending = false;
+  let isFahrenheit      = localStorage.getItem('unit') === 'f';
+  let lastD             = null;   // последний payload — для перерисовки при смене единиц
+  let deviceTime        = '--:--:--';
 
   const slider = document.getElementById('brightness-slider');
-
   slider.addEventListener('mousedown',  () => { isDragging = true;  });
   slider.addEventListener('touchstart', () => { isDragging = true;  }, { passive: true });
   slider.addEventListener('mouseup',    () => { isDragging = false; });
   slider.addEventListener('touchend',   () => { isDragging = false; });
 
-  // ── Слайдер ──────────────────────────────────────────
+  // ── Единицы температуры ──────────────────────────────
+  function applyUnitUI() {
+    document.getElementById('unit-switch').classList.toggle('on', isFahrenheit);
+    const u = isFahrenheit ? '°F' : '°C';
+    document.getElementById('mt-unit').textContent        = u;
+    document.getElementById('chip-temp-unit').textContent = u;
+  }
+  function toggleUnit() {
+    isFahrenheit = !isFahrenheit;
+    try { localStorage.setItem('unit', isFahrenheit ? 'f' : 'c'); } catch(e) {}
+    applyUnitUI();
+    if (lastD) render(lastD);
+  }
+  function tempVal(c) { return isFahrenheit ? c * 9 / 5 + 32 : c; }
+  function tempTxt(c) { return (c === null || c === undefined) ? '—' : tempVal(c).toFixed(1); }
+  applyUnitUI();
+
+  // ── Статистика: min / avg / max + история для графиков ──
+  const SPARK_MAX  = 300;    // точек в спарклайне (~5 мин при 1 Гц)
+  const SAMPLE_MAX = 1000;   // строк в выгрузке CSV/JSON
+
+  function newStat() { return { min: null, max: null, sum: 0, n: 0, hist: [] }; }
+  let stats = { temp: newStat(), press: newStat(), alt: newStat(), trend: newStat(), chip: newStat() };
+  let samples = [];
+
+  function pushStat(s, v) {
+    if (v === null || v === undefined || isNaN(v)) return;
+    if (s.min === null || v < s.min) s.min = v;
+    if (s.max === null || v > s.max) s.max = v;
+    s.sum += v; s.n++;
+    s.hist.push(v);
+    if (s.hist.length > SPARK_MAX) s.hist.shift();
+  }
+  function avg(s) { return s.n ? s.sum / s.n : null; }
+
+  function resetStats() {
+    stats = { temp: newStat(), press: newStat(), alt: newStat(), trend: newStat(), chip: newStat() };
+    samples = [];
+    ['spark-temp-box','spark-press-box','spark-alt-box','spark-fc-box'].forEach(function(id) {
+      document.getElementById(id).innerHTML = '<div class="spark-empty">collecting…</div>';
+    });
+    if (lastD) { ingest(lastD); render(lastD); }
+    logEvent('info', 'Min/avg/max counters reset');
+    showToast('Min/max reset');
+  }
+
+  // ── Спарклайн (inline SVG, без внешних библиотек) ─────
+  function drawSpark(boxId, data, color, minSpan) {
+    const box = document.getElementById(boxId);
+    if (!data || data.length < 2) return;
+    const W = 300, H = 60, PAD = 4;
+    let lo = Math.min.apply(null, data), hi = Math.max.apply(null, data);
+    if (hi - lo < minSpan) { const mid = (hi + lo) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
+    const n = data.length;
+    const X = i => (i / (n - 1)) * W;
+    const Y = v => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
+
+    let d = 'M ' + X(0).toFixed(1) + ' ' + Y(data[0]).toFixed(1);
+    for (let i = 1; i < n; i++) {
+      const xm = ((X(i - 1) + X(i)) / 2).toFixed(1);
+      d += ' C ' + xm + ' ' + Y(data[i - 1]).toFixed(1) + ', ' +
+                   xm + ' ' + Y(data[i]).toFixed(1) + ', ' +
+                   X(i).toFixed(1) + ' ' + Y(data[i]).toFixed(1);
+    }
+    const gid = 'g-' + boxId;
+    box.innerHTML =
+      '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
+      '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.38"/>' +
+      '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"/>' +
+      '</linearGradient></defs>' +
+      '<path d="' + d + ' L ' + W + ' ' + H + ' L 0 ' + H + ' Z" fill="url(#' + gid + ')"/>' +
+      '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+      '</svg>';
+  }
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  // ── Лог событий ──────────────────────────────────────
+  const LOG_MAX = 500;
+  let logLines = 0;
+  function logEvent(lvl, msg) {
+    const body = document.getElementById('log-body');
+    const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 30;
+    const row = document.createElement('div');
+    row.className = 'log-line lvl-' + lvl;
+    const ts = document.createElement('span'); ts.className = 'log-ts';  ts.textContent = deviceTime;
+    const lv = document.createElement('span'); lv.className = 'log-lvl'; lv.textContent = lvl.toUpperCase();
+    const tx = document.createElement('span'); tx.className = 'log-msg'; tx.textContent = msg;
+    row.appendChild(ts); row.appendChild(lv); row.appendChild(tx);
+    body.appendChild(row);
+    logLines++;
+    while (logLines > LOG_MAX) { body.removeChild(body.firstChild); logLines--; }
+    document.getElementById('log-count').textContent = logLines;
+    if (atBottom) body.scrollTop = body.scrollHeight;
+  }
+  function toggleLvl(btn) {
+    const lvl = btn.getAttribute('data-lvl');
+    const on  = btn.classList.toggle('on');
+    document.getElementById('log-body').classList.toggle('hide-' + lvl, !on);
+  }
+
+  // ── Слайдер яркости ──────────────────────────────────
   function paintSlider(val) {
     slider.style.background =
-      'linear-gradient(var(--accent), var(--accent)) 0/' + val + '% 100% no-repeat, var(--slider-bg)';
+      'linear-gradient(var(--accent), var(--accent)) 0/' + val + '% 100% no-repeat, var(--track)';
   }
   function onSliderInput(val) {
     val = parseInt(val);
@@ -631,6 +914,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'value=' + val
     });
+    logEvent('info', 'Brightness set to ' + val + '%');
   }
 
   // ── Режим яркости ────────────────────────────────────
@@ -650,9 +934,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     })
     .then(() => {
       modeChangePending = false;
+      logEvent('info', 'Brightness mode: ' + (manual ? 'manual' : 'auto'));
       if (!manual) showToast('Auto brightness enabled');
     })
-    .catch(() => { modeChangePending = false; });
+    .catch(() => {
+      modeChangePending = false;
+      logEvent('error', 'Brightness request failed');
+    });
   }
 
   function _applyModeUI(manual) {
@@ -669,7 +957,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
   }
 
-  // ── Питание ──────────────────────────────────────────
+  // ── Питание дисплея ──────────────────────────────────
   function togglePower() {
     const btn = document.getElementById('btn-power');
     btn.disabled = true;
@@ -678,32 +966,46 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'on=' + (isDisplayOn ? '0' : '1')
     })
+    .catch(() => logEvent('error', 'Power request failed'))
     .finally(() => { btn.disabled = false; });
   }
 
   function _applyPowerUI(on) {
     isDisplayOn = on;
     const btn = document.getElementById('btn-power');
-    btn.textContent = on ? '⏻ Display On' : '⏻ Display Off';
+    btn.textContent = on ? '⏻ Display on' : '⏻ Display off';
     btn.className   = 'btn-action btn-power ' + (on ? 'on' : 'off');
   }
 
-  // ── WebSocket ─────────────────────────────────────────
-  let ws, wsReconnectTimer;
+  // ── WebSocket ────────────────────────────────────────
+  let ws, wsReconnectTimer, sawFirstFrame = false;
   function wsConnect() {
-    swServerSynced = false;              // при новом коннекте заново берём состояние секундомера с устройства
+    swServerSynced = false;   // при новом коннекте заново берём состояние секундомера
     ws = new WebSocket('ws://' + location.hostname + ':81/');
-    ws.onopen    = () => { setWsStatus(true);  clearTimeout(wsReconnectTimer); };
-    ws.onmessage = (e) => { try { updateUI(JSON.parse(e.data)); } catch(_) {} };
-    ws.onclose   = () => { setWsStatus(false); wsReconnectTimer = setTimeout(wsConnect, 3000); };
+    ws.onopen    = () => { setWsStatus(true); clearTimeout(wsReconnectTimer); logEvent('ok', 'WebSocket connected'); };
+    ws.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (!sawFirstFrame) { sawFirstFrame = true; logEvent('info', 'Telemetry stream started'); }
+        ingest(d); render(d);
+      } catch(_) {}
+    };
+    ws.onclose   = () => {
+      setWsStatus(false);
+      logEvent('error', 'WebSocket disconnected — retrying in 3s');
+      wsReconnectTimer = setTimeout(wsConnect, 3000);
+    };
     ws.onerror   = () => ws.close();
   }
   function setWsStatus(ok) {
-    document.getElementById('ws-dot').className    = 'ws-dot ' + (ok ? 'connected' : 'disconnected');
-    document.getElementById('ws-label').textContent = ok ? 'LIVE' : 'OFFLINE';
+    const cls = 'ws-dot ' + (ok ? 'connected' : 'disconnected');
+    document.getElementById('ws-dot').className  = cls;
+    document.getElementById('log-dot').className = cls;
+    document.getElementById('ws-label').textContent      = ok ? 'Live' : 'Offline';
+    document.getElementById('log-conn-label').textContent = ok ? 'Connected' : 'Disconnected';
   }
 
-  // ── Полоса секунд ─────────────────────────────────────
+  // ── Полоса секунд ────────────────────────────────────
   let lastSecPct = 0;
   function updateSecBar(timeStr) {
     const parts = (timeStr || '').split(':');
@@ -712,60 +1014,163 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     if (isNaN(sec)) return;
     const pct = (sec / 60) * 100;
     const bar = document.getElementById('sec-bar');
-    // при переходе на новую минуту не анимируем «назад»
     if (pct < lastSecPct) { bar.style.transition = 'none'; bar.style.width = pct + '%';
                             void bar.offsetWidth; bar.style.transition = ''; }
     else                  { bar.style.width = pct + '%'; }
     lastSecPct = pct;
   }
 
-  // ── UI update ─────────────────────────────────────────
-  function updateUI(d) {
+  // ── Приём данных: копим статистику и историю ─────────
+  let prevBmpValid = true, prevBatLow = false, prevForecast = -1, prevRamWarn = false;
+
+  function ingest(d) {
+    if (d.bmp_valid) {
+      pushStat(stats.temp,  d.bmp_temp);
+      pushStat(stats.press, d.pressure);
+      pushStat(stats.alt,   d.altitude);
+      pushStat(stats.trend, d.trend);
+    }
+    const chip = parseFloat(d.temp);
+    if (!isNaN(chip)) pushStat(stats.chip, chip);
+
+    samples.push({
+      time: d.time,
+      uptime: d.uptime,
+      bmp_temp: d.bmp_valid ? +d.bmp_temp.toFixed(2) : null,
+      pressure: d.bmp_valid ? +d.pressure.toFixed(2) : null,
+      altitude: d.bmp_valid ? +d.altitude.toFixed(1) : null,
+      trend:    d.bmp_valid ? +d.trend.toFixed(2)    : null,
+      chip_temp: isNaN(chip) ? null : chip,
+      rssi: d.rssi,
+      ram_free: d.ram_free,
+      bat_pct: d.bat_valid ? d.bat_pct : null,
+      bat_v:   d.bat_valid ? +d.bat_v.toFixed(2) : null
+    });
+    if (samples.length > SAMPLE_MAX) samples.shift();
+
+    // ── События в лог (только по факту изменения) ──
+    if (d.bmp_valid !== prevBmpValid) {
+      logEvent(d.bmp_valid ? 'ok' : 'error',
+               d.bmp_valid ? 'BMP280 sensor online' : 'BMP280 not responding');
+      prevBmpValid = d.bmp_valid;
+    }
+    if (d.bat_valid) {
+      if (d.bat_low && !prevBatLow) logEvent('warn', 'Battery low — ' + d.bat_pct + '% (' + d.bat_v.toFixed(2) + ' V)');
+      if (!d.bat_low && prevBatLow) logEvent('ok', 'Battery back to normal — ' + d.bat_pct + '%');
+      prevBatLow = d.bat_low;
+    }
+    if (d.bmp_valid && d.forecast !== prevForecast) {
+      logEvent('info', 'Forecast: ' + forecastName(d.forecast));
+      prevForecast = d.forecast;
+    }
+    const ramPct = Math.round((d.ram_total - d.ram_free) * 100 / d.ram_total);
+    if (ramPct > 80 && !prevRamWarn) { logEvent('warn', 'RAM usage high — ' + ramPct + '%'); prevRamWarn = true; }
+    if (ramPct <= 75 && prevRamWarn) { logEvent('ok', 'RAM usage back to ' + ramPct + '%');  prevRamWarn = false; }
+  }
+
+  const FORECAST = [
+    ['—',    'No data',  ''],
+    ['☀️',   'Clear',    'good'],
+    ['⛅',   'Variable', 'info'],
+    ['🌧️', 'Rain',     'warn']
+  ];
+  function forecastName(i) { return (FORECAST[i] || FORECAST[0])[1]; }
+
+  function comfort(c) {
+    if (c < 16) return ['Cold', 'info'];
+    if (c < 20) return ['Cool', 'info'];
+    if (c <= 26) return ['Comfortable', 'good'];
+    if (c <= 30) return ['Warm', 'warn'];
+    return ['Hot', 'crit'];
+  }
+  function pressureLevel(p) {
+    if (p < 1000) return ['Low', 'warn'];
+    if (p > 1025) return ['High', 'info'];
+    return ['Normal', 'good'];
+  }
+  function setPill(id, txtId, label, cls) {
+    document.getElementById(id).className = 'pill' + (cls ? ' ' + cls : '');
+    document.getElementById(txtId).textContent = label;
+  }
+  function rssiQuality(r) {
+    if (r >= -50) return 'Excellent';
+    if (r >= -60) return 'Good';
+    if (r >= -70) return 'Fair';
+    return 'Weak';
+  }
+
+  // ── Отрисовка ────────────────────────────────────────
+  function render(d) {
+    lastD = d;
+    deviceTime = d.time || deviceTime;
+
     document.getElementById('time').textContent         = d.time;
     document.getElementById('date').textContent         = d.date;
     document.getElementById('day').textContent          = d.day;
     document.getElementById('uptime-label').textContent = d.uptime;
     document.getElementById('ssid').textContent         = d.ssid;
     document.getElementById('ip').textContent           = d.ip;
-    document.getElementById('temp').textContent         = d.temp;
     document.getElementById('clients-val').textContent  = d.clients;
     document.getElementById('rssi-val').textContent     = d.rssi;
+    document.getElementById('rssi-quality').textContent = rssiQuality(d.rssi);
     document.getElementById('req-count').textContent    = Number(d.requests).toLocaleString();
     document.getElementById('bright-label').textContent = d.brightness_label;
+    document.getElementById('chip-temp').textContent    = tempTxt(parseFloat(d.temp));
 
     updateSecBar(d.time);
 
-    // ── Погода (BMP280) ──
+    // ── Метрики BMP280 ──
     if (d.bmp_valid) {
-      document.getElementById('w-temp').textContent          = d.bmp_temp.toFixed(1);
-      document.getElementById('w-pressure').textContent      = d.pressure.toFixed(1);
-      document.getElementById('w-pressure-mmhg').textContent = d.pressure_mmhg.toFixed(0);
-      document.getElementById('w-altitude').textContent      = d.altitude.toFixed(0);
-      document.getElementById('w-trend').textContent         = (d.trend >= 0 ? '+' : '') + d.trend.toFixed(2);
-      const FC = [['—','No data'], ['☀️','Clear'], ['⛅','Variable'], ['🌧️','Rain']];
-      const fc = FC[d.forecast] || FC[0];
-      document.getElementById('w-forecast-emoji').textContent = fc[0];
-      document.getElementById('w-forecast').textContent       = fc[1];
+      document.getElementById('mt-val').textContent = tempTxt(d.bmp_temp);
+      document.getElementById('mt-min').textContent = tempTxt(stats.temp.min);
+      document.getElementById('mt-avg').textContent = tempTxt(avg(stats.temp));
+      document.getElementById('mt-max').textContent = tempTxt(stats.temp.max);
+      const cf = comfort(d.bmp_temp);
+      setPill('mt-pill', 'mt-pill-txt', cf[0], cf[1]);
+
+      document.getElementById('mp-val').textContent = d.pressure.toFixed(1);
+      document.getElementById('mp-min').textContent = stats.press.min.toFixed(1);
+      document.getElementById('mp-avg').textContent = avg(stats.press).toFixed(1);
+      document.getElementById('mp-max').textContent = stats.press.max.toFixed(1);
+      const pl = pressureLevel(d.pressure);
+      setPill('mp-pill', 'mp-pill-txt', pl[0] + ' · ' + d.pressure_mmhg.toFixed(0) + ' mmHg', pl[1]);
+
+      document.getElementById('ma-val').textContent = d.altitude.toFixed(0);
+
+      document.getElementById('mf-val').textContent = (d.trend >= 0 ? '+' : '') + d.trend.toFixed(2);
+      const fc = FORECAST[d.forecast] || FORECAST[0];
+      setPill('mf-pill', 'mf-pill-txt', fc[0] + '  ' + fc[1], fc[2]);
+      document.getElementById('mf-desc').textContent =
+        d.trend > 0.5 ? 'Pressure rising — conditions improving'
+      : d.trend < -0.5 ? 'Pressure falling — weather may turn'
+      : 'Barometric change over the last hour';
+
+      drawSpark('spark-temp-box',  stats.temp.hist,  cssVar('--c-temp'),  0.5);
+      drawSpark('spark-press-box', stats.press.hist, cssVar('--c-press'), 1.0);
+      drawSpark('spark-alt-box',   stats.alt.hist,   cssVar('--c-alt'),   5.0);
+      drawSpark('spark-fc-box',    stats.trend.hist, cssVar('--c-fc'),    0.4);
     } else {
-      document.getElementById('w-temp').textContent = '—';
-      document.getElementById('w-forecast').textContent = 'no sensor';
-      document.getElementById('w-forecast-emoji').textContent = '⚠️';
+      ['mt-val','mt-min','mt-avg','mt-max','mp-val','mp-min','mp-avg','mp-max','ma-val','mf-val']
+        .forEach(id => { document.getElementById(id).textContent = '—'; });
+      setPill('mt-pill', 'mt-pill-txt', 'No sensor', 'crit');
+      setPill('mp-pill', 'mp-pill-txt', 'No sensor', 'crit');
+      setPill('mf-pill', 'mf-pill-txt', 'No sensor', 'crit');
     }
 
-    // ── Батарея (прячем, если питание от USB) ──
-    const batTile = document.getElementById('tile-battery');
+    // ── Батарея (скрываем при питании от USB) ──
+    const batTile = document.getElementById('bat-tile');
     if (d.bat_valid) {
       batTile.style.display = '';
-      document.getElementById('w-bat-pct').textContent = d.bat_pct;
-      document.getElementById('w-bat-v').textContent   = d.bat_v.toFixed(2);
-      const bbar = document.getElementById('w-bat-bar');
-      bbar.style.width = d.bat_pct + '%';
-      bbar.className = 'ram-bar-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
+      document.getElementById('bat-pct').textContent = d.bat_pct;
+      document.getElementById('bat-v').textContent   = d.bat_v.toFixed(2);
+      const bf = document.getElementById('bat-fill');
+      bf.style.width = d.bat_pct + '%';
+      bf.className = 'batt-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
     } else {
       batTile.style.display = 'none';
     }
 
-    // curl-примеры под реальный IP (шаблоны в data-cmd, плейсхолдер {ip})
+    // curl-примеры под реальный IP
     document.querySelectorAll('.curl-line[data-cmd]').forEach(function(el) {
       el.textContent = el.getAttribute('data-cmd').replace('{ip}', d.ip);
     });
@@ -778,17 +1183,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       document.getElementById('brightness-pct').textContent = pct;
     }
 
-    // Режим яркости
     if (!modeChangePending) {
       const serverManual = (d.brightness_manual === true);
-      if (serverManual !== isManual) {
-        isManual = serverManual;
-        _applyModeUI(serverManual);
-      }
+      if (serverManual !== isManual) { isManual = serverManual; _applyModeUI(serverManual); }
     }
 
-    // Питание
-    if (d.display_on !== isDisplayOn) _applyPowerUI(d.display_on);
+    if (d.display_on !== isDisplayOn) {
+      _applyPowerUI(d.display_on);
+      logEvent('info', 'Display turned ' + (d.display_on ? 'on' : 'off'));
+    }
 
     // WiFi
     const lvl = d.rssi >= -50 ? 4 : d.rssi >= -60 ? 3 : d.rssi >= -70 ? 2 : 1;
@@ -796,23 +1199,63 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       document.getElementById('d' + i).className = i <= lvl ? 'on' : '';
 
     // RAM
-    const used = d.ram_total - d.ram_free;
-    const rpct = Math.round(used * 100 / d.ram_total);
-    document.getElementById('ram-txt').textContent =
-      Math.round(d.ram_free / 1024) + ' KB free  ·  ' +
-      Math.round(d.ram_total / 1024) + ' KB total  ·  ' + rpct + '% used';
+    const used  = d.ram_total - d.ram_free;
+    const rpct  = Math.round(used * 100 / d.ram_total);
+    document.getElementById('ram-val').textContent  = (d.ram_free / 1024).toFixed(1);
+    document.getElementById('ram-used').textContent = rpct + '% used';
+    document.getElementById('ram-free').textContent = (100 - rpct) + '% free';
     const ramBar = document.getElementById('ram-bar');
     ramBar.style.width = rpct + '%';
-    ramBar.className = 'ram-bar-fill' + (rpct > 80 ? ' crit' : rpct > 60 ? ' warn' : '');
+    ramBar.className = 'mini-fill' + (rpct > 80 ? ' crit' : rpct > 60 ? ' warn' : '');
 
-    // Секундомер — берём состояние с устройства при первом сообщении/реконнекте
+    // Секундомер — состояние берём с устройства при первом фрейме/реконнекте
     if (!swServerSynced && d.sw_state !== undefined) {
       adoptStopwatch(d.sw_state, d.sw_ms);
       swServerSynced = true;
     }
   }
 
-  // ── Toast / Reboot ────────────────────────────────────
+  // ── Выгрузка данных ──────────────────────────────────
+  function download(name, mime, text) {
+    const blob = new Blob([text], { type: mime });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function() { URL.revokeObjectURL(url); a.remove(); }, 0);
+  }
+  function stamp() { return (deviceTime || '').replace(/:/g, '-'); }
+
+  function exportCsv() {
+    if (!samples.length) { showToast('No samples collected yet'); return; }
+    const cols = ['time','uptime','bmp_temp','pressure','altitude','trend','chip_temp','rssi','ram_free','bat_pct','bat_v'];
+    const rows = [cols.join(',')];
+    samples.forEach(function(s) {
+      rows.push(cols.map(function(c) { return s[c] === null || s[c] === undefined ? '' : s[c]; }).join(','));
+    });
+    download('esp32-clock-' + stamp() + '.csv', 'text/csv', rows.join('\n'));
+    logEvent('ok', 'Exported ' + samples.length + ' samples to CSV');
+  }
+
+  function exportJson() {
+    if (!samples.length) { showToast('No samples collected yet'); return; }
+    const out = {
+      exported_at: deviceTime,
+      host: location.hostname,
+      stats: {
+        temp:  { min: stats.temp.min,  avg: avg(stats.temp),  max: stats.temp.max,  unit: 'C' },
+        press: { min: stats.press.min, avg: avg(stats.press), max: stats.press.max, unit: 'hPa' },
+        alt:   { min: stats.alt.min,   avg: avg(stats.alt),   max: stats.alt.max,   unit: 'm' },
+        trend: { min: stats.trend.min, avg: avg(stats.trend), max: stats.trend.max, unit: 'hPa/h' },
+        chip:  { min: stats.chip.min,  avg: avg(stats.chip),  max: stats.chip.max,  unit: 'C' }
+      },
+      samples: samples
+    };
+    download('esp32-clock-' + stamp() + '.json', 'application/json', JSON.stringify(out, null, 2));
+    logEvent('ok', 'Exported ' + samples.length + ' samples to JSON');
+  }
+
+  // ── Toast / Reboot ───────────────────────────────────
   function showToast(msg, ms) {
     ms = ms || 2500;
     const t = document.getElementById('toast');
@@ -827,32 +1270,28 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     btn.disabled = true;
     btn.textContent = 'Rebooting…';
     fetch('/api/reboot', { method: 'POST' }).catch(function(){});
+    logEvent('warn', 'Reboot requested');
     showToast('Rebooting… reconnecting in 6s', 6000);
-    setTimeout(function() {
-      btn.disabled = false;
-      btn.textContent = 'Reboot';
-    }, 7000);
+    setTimeout(function() { btn.disabled = false; btn.textContent = 'Reboot'; }, 7000);
   }
 
   // ── Секундомер ───────────────────────────────────────
-  let swRunning     = false;
-  let swStartTs     = 0;
-  let swAccum       = 0;
-  let swRafId       = null;
-  let swLaps        = [];
-  let swLastLapMs   = 0;
+  let swRunning      = false;
+  let swStartTs      = 0;
+  let swAccum        = 0;
+  let swRafId        = null;
+  let swLaps         = [];
+  let swLastLapMs    = 0;
   let swServerSynced = false;
 
   function swSend(cmd) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
   }
-
-  // Приводим локальный секундомер к состоянию устройства (state: 0=idle,1=run,2=pause)
-  // Секундомер становится «героем» (наверх + крупнее), когда активен
   function setSwHero(active) {
     document.body.classList.toggle('sw-active', active);
   }
 
+  // state: 0=idle, 1=running, 2=paused
   function adoptStopwatch(state, ms) {
     cancelAnimationFrame(swRafId);
     swLaps = []; swLastLapMs = 0;
@@ -860,7 +1299,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const startBtn = document.getElementById('sw-start-btn');
     const lapBtn   = document.getElementById('sw-lap-btn');
 
-    if (state === 1) {                 // RUNNING
+    if (state === 1) {
       swRunning = true;
       swAccum   = ms;
       swStartTs = performance.now();
@@ -869,7 +1308,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       lapBtn.disabled = false;
       setSwHero(true);
       swTick();
-    } else if (state === 2) {          // PAUSED
+    } else if (state === 2) {
       swRunning = false;
       swAccum   = ms;
       swStartTs = 0;
@@ -878,7 +1317,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.classList.remove('running');
       lapBtn.disabled = (ms <= 0);
       setSwHero(true);
-    } else {                           // IDLE
+    } else {
       swRunning = false;
       swAccum   = 0;
       swStartTs = 0;
@@ -900,6 +1339,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.classList.add('running');
       document.getElementById('sw-lap-btn').disabled = false;
       setSwHero(true);
+      logEvent('info', 'Stopwatch started');
       swTick();
     } else {
       swRunning = false;
@@ -908,12 +1348,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       swSend('sw:pause');
       startBtn.textContent = 'Resume';
       startBtn.classList.remove('running');
+      logEvent('info', 'Stopwatch paused at ' + swFmt(swAccum));
     }
   }
 
   function swTick() {
-    const now = swAccum + (performance.now() - swStartTs);
-    swRender(now);
+    swRender(swAccum + (performance.now() - swStartTs));
     if (swRunning) swRafId = requestAnimationFrame(swTick);
   }
 
@@ -942,14 +1382,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const delta = now - swLastLapMs;
     swLastLapMs = now;
     swLaps.push({ total: now, delta: delta });
-    const container = document.getElementById('sw-laps');
     const row = document.createElement('div');
     row.className = 'sw-lap-item';
     row.innerHTML =
       '<span class="sw-lap-num">Lap ' + swLaps.length + '</span>' +
       '<span class="sw-lap-time">' + swFmt(now) + '</span>' +
       '<span class="sw-lap-delta">+' + swFmt(delta) + '</span>';
-    container.prepend(row);
+    document.getElementById('sw-laps').prepend(row);
   }
 
   function swReset() {
@@ -966,6 +1405,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('sw-start-btn').classList.remove('running');
     document.getElementById('sw-lap-btn').disabled = true;
     document.getElementById('sw-laps').innerHTML = '';
+    logEvent('info', 'Stopwatch reset');
   }
 
   function swFmt(ms) {
@@ -975,18 +1415,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     if (totalSec < 3600) {
       const mi = Math.floor(totalSec / 60);
       const sc = totalSec % 60;
-      const ml = ms % 1000;
-      return p2(mi) + ':' + p2(sc) + '.' + String(ml).padStart(3, '0');
+      return p2(mi) + ':' + p2(sc) + '.' + String(ms % 1000).padStart(3, '0');
     }
-    const h = Math.floor(totalSec / 3600);
+    const h  = Math.floor(totalSec / 3600);
     const mi = Math.floor((totalSec % 3600) / 60);
     const sc = totalSec % 60;
     return p2(h) + ':' + p2(mi) + ':' + p2(sc);
   }
 
-  wsConnect();
-
-  // ── Copy curl ─────────────────────────────────────────
+  // ── Copy curl ────────────────────────────────────────
   function copyCmd(id, btn) {
     const text = document.getElementById(id).textContent.trim();
     function done() {
@@ -1010,6 +1447,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       fallback();
     }
   }
+
+  logEvent('ok', 'Dashboard loaded');
+  wsConnect();
 </script>
 </body>
 </html>
