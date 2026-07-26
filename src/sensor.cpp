@@ -28,10 +28,10 @@ bool sensorInit() {
     }
 
     bmp.setSampling(
-        Adafruit_BMP280::MODE_NORMAL,
+        Adafruit_BMP280::MODE_FORCED,
         Adafruit_BMP280::SAMPLING_X2,
         Adafruit_BMP280::SAMPLING_X16,
-        Adafruit_BMP280::FILTER_X16,
+        Adafruit_BMP280::FILTER_X4,
         Adafruit_BMP280::STANDBY_MS_500
     );
 
@@ -71,6 +71,12 @@ SensorData sensorRead() {
 
     if (!_initialized) {
         data.valid = false;
+        return data;
+    }
+
+    if (!bmp.takeForcedMeasurement()) {
+        data.valid = false;
+        Serial.println("[BMP280] Измерение не завершилось!");
         return data;
     }
 

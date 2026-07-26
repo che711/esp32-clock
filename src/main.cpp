@@ -24,8 +24,8 @@
 #define PIN_DC     OLED_DC_PIN
 #define PIN_RST    OLED_RST_PIN
 
-U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI
-    u8g2(U8G2_R0, PIN_CLK, PIN_DIN, PIN_CS, PIN_DC, PIN_RST);
+U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI
+    u8g2(U8G2_R0, PIN_CS, PIN_DC, PIN_RST);
 
 WebServer        server(80);
 WebSocketsServer webSocket(81);
@@ -572,6 +572,7 @@ void setup() {
     battery = batteryRead();
 
 #if HAS_DISPLAY
+    SPI.begin(PIN_CLK, -1, PIN_DIN, PIN_CS);
     u8g2.begin();
     u8g2.setContrast(currentContrast);
     u8g2.clearBuffer();
@@ -615,8 +616,12 @@ void loop() {
     updateTimeStrings();
 
     if (swState == SW_RUNNING) {
-        // Секундомер активен — перерисовываем дисплей каждые ~100 мс
-        drawOLED();
+        static uint32_t lastSwDraw = 0;
+        uint32_t nowMs = millis();
+        if (nowMs - lastSwDraw >= SW_DRAW_INTERVAL_MS) {
+            lastSwDraw = nowMs;
+            drawOLED();
+        }
         // Часы/аптайм в браузере: broadcastState раз в секунду
         if (strcmp(timeBuf, prevTimeBuf) != 0) {
             strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf) - 1);

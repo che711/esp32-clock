@@ -76,6 +76,7 @@
 
 // ── Интервалы ────────────────────────────────────────────────
 #define SENSOR_INTERVAL_MS   10000UL  // опрос BMP280
+#define SW_DRAW_INTERVAL_MS    200UL  // перерисовка OLED при работе секундомера
 #define MQTT_INTERVAL_MS     30000UL  // публикация MQTT (≥ SENSOR_INTERVAL)
 #define MQTT_RECONNECT_MS     5000UL
 #define PRESSURE_HISTORY_INTERVAL_MS 300000UL  // точка истории давления (5 мин)
