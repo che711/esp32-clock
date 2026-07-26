@@ -18,7 +18,7 @@
 // ============================================================
 
 // ── WiFi ────────────────────────────────────────────────────
-#define WIFI_SSID       "SkyNet"
+#define WIFI_SSID       "networok"
 #define WIFI_PASSWORD   "password"
 
 // Hostname (mDNS: http://clock.local)
