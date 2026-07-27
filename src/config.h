@@ -5,20 +5,33 @@
 //  «Часы + метеостанция» на ESP32-C6-Zero
 //
 //  ┌─ КАРТА ПИНОВ ESP32-C6-Zero ──────────────────────────┐
-//  │ GPIO2  → Battery ADC   (делитель 18650)              │
+//  │ GPIO2  → Battery ADC    (делитель 18650, ADC1_CH2)    │
 //  │ GPIO4  → BMP280 SDA     (strapping-пин, для I²C ок)   │
 //  │ GPIO5  → BMP280 SCL     (strapping-пин, для I²C ок)   │
 //  │ GPIO8  → WS2812 RGB LED (встроенный, не трогать)      │
-//  │ ── OLED SSD1322 (software SPI) ──                     │
-//  │ GPIO6  → CLK   GPIO7 → DIN                            │
-//  │ GPIO1  → CS    GPIO3 → DC    GPIO0 → RST              │
+//  │ ── OLED SSD1322 (hardware SPI) ──                     │
+//  │ GPIO18 → CLK   GPIO19 → DIN                           │
+//  │ GPIO20 → CS    GPIO21 → DC    GPIO22 → RST            │
 //  └──────────────────────────────────────────────────────┘
-//  Strapping-пины C6: 4,5,8,9,15 — не занимай их дисплеем.
-//  Свободные и «безопасные» под OLED: 0,1,3,6,7,14,18..23.
+//
+//  ВАЖНО — у C6-Zero пины двух сортов, они НЕ равноценны:
+//    • Боковые кастеллированные (сюда паяется гребёнка):
+//        левый ряд  5V GND 3V3 | 0 1 2 3 4 5
+//        правый ряд TX RX | 14 15 18 19 20 21 22
+//    • Пятачки на ОБРАТНОЙ стороне платы (провод тянуть под неё):
+//        6 7 8 9 12 13 23
+//  Поэтому OLED сидит на правом боковом ряду (18..22), а не на 6/7:
+//  SPI — самые быстрые линии, тянуть их с изнанки не надо.
+//
+//  Занято намертво: 8 (WS2812), 9 (кнопка BOOT),
+//                   12/13 (USB D-/D+, у нас USB CDC), TX/RX (UART0).
+//  Strapping-пины C6: 4,5,8,9,15 — дисплеем не занимать.
+//  ADC есть ТОЛЬКО на GPIO0..6 — отсюда батарея на 2.
+//  Свободный резерв: 0,1,3,14 (боковые) + 6,7,23 (изнанка).
 // ============================================================
 
 // ── WiFi ────────────────────────────────────────────────────
-#define WIFI_SSID       "SkyNet"
+#define WIFI_SSID       "networok"
 #define WIFI_PASSWORD   "password"
 
 // Hostname (mDNS: http://clock.local)
@@ -30,14 +43,15 @@
 // London: "GMT0BST,M3.5.0/1,M10.5.0" | Kyiv: "EET-2EEST,M3.5.0/3,M10.5.0/4" | UTC: "UTC0"
 #define TZ_INFO         "CET-1CEST,M3.5.0,M10.5.0/3"
 
-// ── OLED SSD1322 256x64 (software SPI) ──────────────────────
-// Пока панель не подпаяна — HAS_DISPLAY 0 (уберёт слепой битбанг 8 КБ/с).
+// ── OLED SSD1322 256x64 (hardware SPI) ──────────────────────
+// Пока панель не подпаяна — HAS_DISPLAY 0 (не гонять SPI вслепую).
+// Все пять пинов — правый боковой ряд платы, паяются одним шлейфом.
 #define HAS_DISPLAY     1
-#define OLED_CLK_PIN    6
-#define OLED_DIN_PIN    7
-#define OLED_CS_PIN     1
-#define OLED_DC_PIN     3
-#define OLED_RST_PIN    0
+#define OLED_CLK_PIN    18
+#define OLED_DIN_PIN    19
+#define OLED_CS_PIN     20
+#define OLED_DC_PIN     21
+#define OLED_RST_PIN    22
 
 // ── BMP280 (I²C) ────────────────────────────────────────────
 #define BMP280_SDA_PIN  4
@@ -80,7 +94,3 @@
 #define MQTT_INTERVAL_MS     30000UL  // публикация MQTT (≥ SENSOR_INTERVAL)
 #define MQTT_RECONNECT_MS     5000UL
 #define PRESSURE_HISTORY_INTERVAL_MS 300000UL  // точка истории давления (5 мин)
-
-// ── OTA ──────────────────────────────────────────────────────
-#define OTA_ENABLED  false
-#define OTA_PASSWORD "ota_password"

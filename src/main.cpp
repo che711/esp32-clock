@@ -3,7 +3,6 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <ESPmDNS.h>
-#include <ArduinoOTA.h>
 #include <esp_wifi.h>
 #include <time.h>
 #include <U8g2lib.h>
@@ -537,19 +536,6 @@ void updateWeather() {
     }
 }
 
-// ─── OTA по воздуху ──────────────────────────────────────
-void otaInit() {
-#if OTA_ENABLED
-    ArduinoOTA.setHostname(HOSTNAME);
-    ArduinoOTA.setPassword(OTA_PASSWORD);
-    ArduinoOTA.onStart([]()  { ledColor(20, 10, 0); Serial.println("[OTA] start"); });
-    ArduinoOTA.onEnd([]()    { ledColor(0, 20, 0);  Serial.println("[OTA] done");  });
-    ArduinoOTA.onError([](ota_error_t e){ ledColor(20, 0, 0); Serial.printf("[OTA] err %u\n", e); });
-    ArduinoOTA.begin();
-    Serial.println("[OTA] ready");
-#endif
-}
-
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
@@ -583,7 +569,6 @@ void setup() {
 
     connectWifi();
     syncNTP();
-    otaInit();
 
     server.on("/",               HTTP_GET,  handleRoot);
     server.on("/api/stats",      HTTP_GET,  handleApiStats);
@@ -606,9 +591,6 @@ void setup() {
 }
 
 void loop() {
-#if OTA_ENABLED
-    ArduinoOTA.handle();
-#endif
     server.handleClient();
     webSocket.loop();
     maintainNetwork();
