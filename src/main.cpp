@@ -270,15 +270,20 @@ void drawOLED();
 void drawStopwatchFrame();
 void invalidateSwLayout();
 
+// Экономия радио. MAX_MODEM холоднее MIN, но задерживает доставку пакетов
+// до ~0.9 с — пока идёт отсчёт секундомера, сон выключаем совсем.
+void setRadioSaving(bool save) {
+    WiFi.setSleep(save);
+    if (save) esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+}
+
 // ─── Секундомер: приём команд ─────────────────────────────
 void swStart() {
     if (swState != SW_RUNNING) {
         swStartMs = millis();
         swState   = SW_RUNNING;
         invalidateSwLayout();       // первый кадр после старта — полный
-        // Modem sleep задерживает доставку WS-пакетов до ~0.9 с: пока идёт
-        // отсчёт, это прямая ошибка синхронизации, поэтому радио не усыпляем.
-        WiFi.setSleep(false);
+        setRadioSaving(false);
         Serial.println("Stopwatch START");
     }
 }
@@ -286,6 +291,7 @@ void swPause() {
     if (swState == SW_RUNNING) {
         swAccumMs += millis() - swStartMs;
         swState    = SW_PAUSED;
+        setRadioSaving(true);       // счётчик заморожен, точность больше не нужна
         Serial.println("Stopwatch PAUSE");
     }
 }
@@ -295,7 +301,7 @@ void swReset() {
     swStartMs      = 0;
     prevTimeBuf[0] = '\0';          // заставляем перерисовать часы
     invalidateSwLayout();
-    WiFi.setSleep(true);            // отсчёт кончился — возвращаем экономию
+    setRadioSaving(true);
     Serial.println("Stopwatch RESET");
 }
 
@@ -337,7 +343,6 @@ void connectWifi() {
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(HOSTNAME);
     WiFi.setAutoReconnect(true);
-    WiFi.setSleep(true);           // modem-sleep: радио спит между маячками — меньше нагрев
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     uint8_t tries = 0;
     while (WiFi.status() != WL_CONNECTED && tries < 30) {
@@ -346,10 +351,7 @@ void connectWifi() {
     if (WiFi.status() == WL_CONNECTED) {
         localIP = WiFi.localIP().toString();
         Serial.printf("\nIP: %s\n", localIP.c_str());
-        // MAX modem-sleep: радио спит дольше (просыпается по DTIM точки доступа).
-        // Заметно холоднее MIN; плата — отклик UI подрастает на десятки–сотни мс.
-        // Если понадобится максимальная отзывчивость — верни WIFI_PS_MIN_MODEM.
-        esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+        setRadioSaving(true);
         if (MDNS.begin(HOSTNAME)) {
             MDNS.addService("http", "tcp", 80);
             Serial.printf("mDNS: http://%s.local\n", HOSTNAME);
