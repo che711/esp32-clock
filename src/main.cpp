@@ -267,12 +267,18 @@ void handleNotFound() {
 
 // ─── Forward declarations ─────────────────────────────────
 void drawOLED();
+void drawStopwatchFrame();
+void invalidateSwLayout();
 
 // ─── Секундомер: приём команд ─────────────────────────────
 void swStart() {
     if (swState != SW_RUNNING) {
         swStartMs = millis();
         swState   = SW_RUNNING;
+        invalidateSwLayout();       // первый кадр после старта — полный
+        // Modem sleep задерживает доставку WS-пакетов до ~0.9 с: пока идёт
+        // отсчёт, это прямая ошибка синхронизации, поэтому радио не усыпляем.
+        WiFi.setSleep(false);
         Serial.println("Stopwatch START");
     }
 }
@@ -288,6 +294,8 @@ void swReset() {
     swAccumMs      = 0;
     swStartMs      = 0;
     prevTimeBuf[0] = '\0';          // заставляем перерисовать часы
+    invalidateSwLayout();
+    WiFi.setSleep(true);            // отсчёт кончился — возвращаем экономию
     Serial.println("Stopwatch RESET");
 }
 
@@ -300,6 +308,20 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
     } else if (type == WStype_TEXT) {
+        // "ping:<токен>" → "pong:<токен>:<state>:<elapsed>".
+        // Горячий путь замера задержки: ни логов, ни рассылки состояния —
+        // клиент по RTT вычисляет, каким был счётчик в момент приёма ответа.
+        if (length >= 5 && strncmp((char*)payload, "ping:", 5) == 0) {
+            size_t tokLen = length - 5;
+            if (tokLen > 12) tokLen = 12;
+            char reply[48];
+            snprintf(reply, sizeof(reply), "pong:%.*s:%d:%lu",
+                     (int)tokLen, (char*)payload + 5,
+                     (int)swState, (unsigned long)swElapsed());
+            webSocket.sendTXT(num, reply);
+            return;
+        }
+
         Serial.printf("WS #%d TEXT: %.*s\n", num, (int)length, (char*)payload);
         // Команды секундомера: "sw:start" / "sw:pause" / "sw:reset"
         if      (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) swStart();
@@ -406,17 +428,48 @@ static int drawBattIcon(int x, int yTop, uint8_t pct) {
     return w + 2;                               // тело + носик
 }
 
-// Нижняя строка (y=63): слева prefix+погода, справа иконка батареи + проценты.
-static void drawBottomStatus(const char* prefix) {
+// Нижняя строка (y=63): слева сегменты через тонкий разделитель,
+// справа иконка батареи + проценты.
+//   mark     — маркер перед сегментами ("II " на паузе), можно nullptr
+//   withDate — день недели и дата (на часах)
+//   withTemp — температура (на секундомере; на часах она уже крупно сверху)
+static void drawBottomStatus(const char* mark, bool withDate, bool withTemp) {
     u8g2.setFont(u8g2_font_5x7_tr);
 
-    char left[48];
-    if (weather.valid)
-        snprintf(left, sizeof(left), "%s%.1fC  %.0fhPa",
-                 prefix, weather.temperature, weather.pressure);
-    else
-        snprintf(left, sizeof(left), "%sno sensor", prefix);
-    u8g2.drawStr(2, 63, left);
+    char tstr[12], pstr[12];
+    const char* segs[4];
+    int n = 0;
+
+    if (withDate && timeSynced) {
+        segs[n++] = dayShortBuf;
+        segs[n++] = dateBuf;
+    }
+    if (!weather.valid) {
+        segs[n++] = "no sensor";
+    } else {
+        if (withTemp) {
+            snprintf(tstr, sizeof(tstr), "%.1fC", weather.temperature);
+            segs[n++] = tstr;
+        }
+        snprintf(pstr, sizeof(pstr), "%.0fhPa", weather.pressure);
+        segs[n++] = pstr;
+    }
+
+    int x = 2;
+    if (mark && mark[0]) {
+        u8g2.drawStr(x, 63, mark);
+        x += u8g2.getStrWidth(mark);
+    }
+    for (int i = 0; i < n; i++) {
+        if (i) {
+            // Точка по центру строчных: вертикальная черта в высоту строки
+            // читалась как буква и сливалась с текстом.
+            u8g2.drawBox(x + 3, 59, 2, 2);
+            x += 8;
+        }
+        u8g2.drawStr(x, 63, segs[i]);
+        x += u8g2.getStrWidth(segs[i]);
+    }
 
     // Батарея — только если обнаружена (иначе питание от USB)
     if (battery.valid) {
@@ -433,6 +486,21 @@ static void drawBottomStatus(const char* prefix) {
 #endif
 
 // ─── Дисплей ─────────────────────────────────────────────
+// Раскладка часов: поля слева/справа и место под знак градуса.
+static const int CLOCK_MARGIN = 4;
+static const int DEGREE_W     = 9;    // кружок градуса после цифр
+static const int SEP_GAP      = 8;    // воздух вокруг разделителя
+// Базовая линия температуры. Часы стоят на 50, но шрифт температуры мельче,
+// поэтому её блок центрируем в полосе цифр (0..53) — визуально это середина.
+static const int TEMP_BASELINE = 42;
+
+// Геометрия поля ".mmm" последнего полного кадра секундомера.
+// swMsBoxX < 0 — данных нет, следующий кадр обязан быть полным.
+static int  swMsX = 0, swMsBoxX = -1, swMsBoxW = 0;
+static char swMmSs[6] = "";
+
+void invalidateSwLayout() { swMsBoxX = -1; }
+
 void drawOLED() {
 #if !HAS_DISPLAY
     return;
@@ -463,41 +531,111 @@ void drawOLED() {
         u8g2.setFont(u8g2_font_logisoso24_tr);
         u8g2.drawStr(xMs, 50, msStr);
 
+        // Запоминаем геометрию поля ".mmm" — по ней идёт быстрая
+        // частичная перерисовка в drawStopwatchFrame().
+        swMsX    = xMs;
+        swMsBoxX = (xMs / 8) * 8;
+        int boxRight = ((xMs + msW + 7) / 8) * 8 + 8;   // +тайл запаса справа
+        if (boxRight > 256) boxRight = 256;
+        swMsBoxW = boxRight - swMsBoxX;
+        memcpy(swMmSs, full, 5);  swMmSs[5] = '\0';
+
         u8g2.drawHLine(0, 53, 256);
 
         // Низ: погода + батарея, с маркером состояния секундомера
-        drawBottomStatus(swState == SW_RUNNING ? "" : "II ");
+        drawBottomStatus(swState == SW_RUNNING ? nullptr : "II ", false, true);
 
     } else {
         // ── Обычный режим часов ────────────────────────
+        // Секунды не показываем — освободившуюся половину экрана забирает
+        // температура. Слева градусы, справа HH:MM, между ними разделитель.
         char hh[3] = { timeBuf[0], timeBuf[1], 0 };
         char mm[3] = { timeBuf[3], timeBuf[4], 0 };
-        char ss[3] = { timeBuf[6], timeBuf[7], 0 };
 
         u8g2.setFont(u8g2_font_logisoso46_tr);
         int dw  = u8g2.getStrWidth("00");
         int cw  = u8g2.getStrWidth(":");
-        const int gap = 5;
-        int total  = dw * 3 + cw * 2 + gap * 4;
-        int margin = (256 - total) / 2;
+        const int gap = 4;
+        int clockW = dw * 2 + cw + gap * 2;
 
-        int x = margin;
+        // Часы прижаты к правому краю, разделитель — на фиксированном месте
+        // слева от них, чтобы не дёргался при смене ширины температуры.
+        int xClock = 256 - CLOCK_MARGIN - clockW;
+        int xSep   = xClock - SEP_GAP;
+
+        int x = xClock;
         u8g2.drawStr(x, 50, hh);  x += dw + gap;
         u8g2.drawStr(x, 50, ":"); x += cw + gap;
-        u8g2.drawStr(x, 50, mm);  x += dw + gap;
-        u8g2.drawStr(x, 50, ":"); x += cw + gap;
-        u8g2.drawStr(x, 50, ss);
+        u8g2.drawStr(x, 50, mm);
+
+        u8g2.drawVLine(xSep, 4, 46);     // разделитель на всю высоту цифр
+
+        // Температура крупно слева. Знак градуса рисуем кружком:
+        // в _tr-наборе шрифта символа ° нет.
+        char tstr[8];
+        if (weather.valid) snprintf(tstr, sizeof(tstr), "%.1f", weather.temperature);
+        else               snprintf(tstr, sizeof(tstr), "--");
+
+        int avail = xSep - SEP_GAP - CLOCK_MARGIN - DEGREE_W;
+        int th = 32;
+        u8g2.setFont(u8g2_font_logisoso32_tr);
+        int tw = u8g2.getStrWidth(tstr);
+        if (tw > avail && weather.valid) {         // "-12.3" шире плюсовой:
+            snprintf(tstr, sizeof(tstr), "%.0f", weather.temperature);
+            tw = u8g2.getStrWidth(tstr);           // сперва жертвуем десятыми
+        }
+        if (tw > avail) {                          // и только потом размером
+            th = 26;
+            u8g2.setFont(u8g2_font_logisoso26_tr);
+            tw = u8g2.getStrWidth(tstr);
+        }
+
+        // Блок «цифры + градус» по центру левой половины. По вертикали он не
+        // стоит на базовой линии часов, а поднят к середине полосы цифр —
+        // шрифт мельче, и на общей базовой линии температура висела низко.
+        int xT = CLOCK_MARGIN + (avail - tw) / 2;
+        u8g2.drawStr(xT, TEMP_BASELINE, tstr);
+        u8g2.drawCircle(xT + tw + 4, TEMP_BASELINE - th + 4, 3);   // ° у верха цифр
 
         u8g2.drawHLine(0, 53, 256);
 
-        // Низ: [день недели] погода + батарея
-        char pfx[8];
-        if (timeSynced) snprintf(pfx, sizeof(pfx), "%s  ", dayShortBuf);
-        else            snprintf(pfx, sizeof(pfx), "%s", "");
-        drawBottomStatus(pfx);
+        // Низ: день недели | дата | давление, справа батарея.
+        // Температура ушла наверх, поэтому внизу её нет.
+        drawBottomStatus(nullptr, true, false);
+        swMsBoxX = -1;                 // на часах поля ".mmm" нет
     }
 
     u8g2.sendBuffer();
+#endif
+}
+
+// Кадр секундомера. Полный кадр стоит ~24 мс (8 КБ буфера по SPI на 10 МГц),
+// поэтому гнать его 25 раз в секунду нельзя. Но между секундами меняется
+// только поле ".mmm" — его полоску (4 тайла по высоте) отправляем отдельно,
+// это ~2 мс, и миллисекунды идут плавно. Полный кадр — раз в секунду,
+// когда меняется "MM:SS" и нижняя строка состояния.
+void drawStopwatchFrame() {
+#if !HAS_DISPLAY
+    return;
+#else
+    if (!displayOn) return;
+
+    uint32_t el = swElapsed();
+    char full[16];
+    formatStopwatch(el, full, sizeof(full));
+
+    // >= 1 часа формат "HH:MM:SS" — миллисекунд нет, дробить нечего.
+    if (el >= 3600000UL || swMsBoxX < 0 || memcmp(full, swMmSs, 5) != 0) {
+        drawOLED();
+        return;
+    }
+
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(swMsBoxX, 24, swMsBoxW, 27);   // y 24..50, линию на y=53 не трогаем
+    u8g2.setDrawColor(1);
+    u8g2.setFont(u8g2_font_logisoso24_tr);
+    u8g2.drawStr(swMsX, 50, full + 5);
+    u8g2.updateDisplayArea(swMsBoxX / 8, 3, swMsBoxW / 8, 4);
 #endif
 }
 
@@ -539,6 +677,15 @@ void updateWeather() {
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+    // Serial здесь — нативный USB-CDC, и его write() блокирующий: пока хост
+    // держит порт открытым, но никто не вычитывает, буфер переполняется и
+    // Serial.printf() встаёт на секунды, останавливая весь loop(). Именно так
+    // секундомер и отставал от браузера на несколько секунд. Нулевой таймаут —
+    // лишний вывод молча теряется, зато отсчёт времени больше не зависит от
+    // того, открыт ли монитор.
+    Serial.setTxTimeoutMs(0);
+#endif
     delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
 
     Serial.println("\n=== ESP32-C6 Clock + Weather boot ===");
@@ -602,7 +749,7 @@ void loop() {
         uint32_t nowMs = millis();
         if (nowMs - lastSwDraw >= SW_DRAW_INTERVAL_MS) {
             lastSwDraw = nowMs;
-            drawOLED();
+            drawStopwatchFrame();
         }
         // Часы/аптайм в браузере: broadcastState раз в секунду
         if (strcmp(timeBuf, prevTimeBuf) != 0) {
