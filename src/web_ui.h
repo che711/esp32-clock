@@ -1208,10 +1208,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     ramBar.style.width = rpct + '%';
     ramBar.className = 'mini-fill' + (rpct > 80 ? ' crit' : rpct > 60 ? ' warn' : '');
 
-    // Секундомер — состояние берём с устройства при первом фрейме/реконнекте
-    if (!swServerSynced && d.sw_state !== undefined) {
-      adoptStopwatch(d.sw_state, d.sw_ms);
-      swServerSynced = true;
+    // Секундомер — ведущее всегда устройство: первый фрейм принимаем целиком,
+    // дальше каждым фреймом подтягиваем локальный счётчик к серверному.
+    if (d.sw_state !== undefined) {
+      if (!swServerSynced) {
+        adoptStopwatch(d.sw_state, d.sw_ms);
+        swServerSynced = true;
+      } else {
+        syncStopwatch(d.sw_state, d.sw_ms);
+      }
     }
   }
 
@@ -1283,9 +1288,39 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let swLaps         = [];
   let swLastLapMs    = 0;
   let swServerSynced = false;
+  let swUiState      = 0;   // что показываем сейчас: 0=idle, 1=running, 2=paused
+  let swMuteUntil    = 0;   // после своей команды даём устройству догнать нас
+
+  const SW_DEADBAND_MS = 60;    // меньше — не дёргаем, всё равно не видно
+  const SW_SNAP_MS     = 500;   // больше — прыгаем на серверное значение сразу
+  const SW_SLEW        = 0.35;  // иначе подтягиваем плавно, доля расхождения за фрейм
+  const SW_MUTE_MS     = 1500;  // окно, пока в эфире могут быть дофреймы со старым состоянием
 
   function swSend(cmd) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
+    swMuteUntil = performance.now() + SW_MUTE_MS;
+  }
+
+  // Подстройка под устройство на каждом телеметрическом фрейме (~1 Гц).
+  // RAF продолжает рисовать миллисекунды между фреймами, а мы лишь убираем
+  // накопленный сдвиг — поэтому дисплей и вкладка не расходятся.
+  function syncStopwatch(state, ms) {
+    if (performance.now() < swMuteUntil) return;   // свой Start/Pause ещё в полёте
+    if (state !== swUiState) { adoptStopwatch(state, ms); return; }
+    if (state === 0) return;
+
+    const local = swAccum + (swRunning ? performance.now() - swStartTs : 0);
+    const drift = ms - local;
+    if (Math.abs(drift) < SW_DEADBAND_MS) return;
+
+    // На паузе число неподвижно — правим разом и точно; на ходу плавно.
+    if (state === 2 || Math.abs(drift) > SW_SNAP_MS) {
+      swAccum   = ms;
+      swStartTs = performance.now();
+    } else {
+      swAccum += drift * SW_SLEW;
+    }
+    if (!swRunning) swRender(swAccum);
   }
   function setSwHero(active) {
     document.body.classList.toggle('sw-active', active);
@@ -1295,6 +1330,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function adoptStopwatch(state, ms) {
     cancelAnimationFrame(swRafId);
     swLaps = []; swLastLapMs = 0;
+    swUiState = (state === 1 || state === 2) ? state : 0;
     document.getElementById('sw-laps').innerHTML = '';
     const startBtn = document.getElementById('sw-start-btn');
     const lapBtn   = document.getElementById('sw-lap-btn');
@@ -1333,6 +1369,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const startBtn = document.getElementById('sw-start-btn');
     if (!swRunning) {
       swRunning = true;
+      swUiState = 1;
       swStartTs = performance.now();
       swSend('sw:start');
       startBtn.textContent = 'Pause';
@@ -1343,6 +1380,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       swTick();
     } else {
       swRunning = false;
+      swUiState = 2;
       swAccum  += performance.now() - swStartTs;
       cancelAnimationFrame(swRafId);
       swSend('sw:pause');
@@ -1393,6 +1431,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   function swReset() {
     swRunning   = false;
+    swUiState   = 0;
     swAccum     = 0;
     swStartTs   = 0;
     swLastLapMs = 0;
