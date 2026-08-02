@@ -1209,8 +1209,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     ramBar.style.width = rpct + '%';
     ramBar.className = 'mini-fill' + (rpct > 80 ? ' crit' : rpct > 60 ? ' warn' : '');
 
-    // Секундомер — ведущее всегда устройство: первый фрейм принимаем целиком,
-    // дальше каждым фреймом подтягиваем локальный счётчик к серверному.
+    // Ведущее всегда устройство: первый фрейм принимаем целиком.
     if (d.sw_state !== undefined) {
       if (!swServerSynced) {
         adoptStopwatch(d.sw_state, d.sw_ms);
@@ -1308,16 +1307,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
 
   // ── Замер задержки ────────────────────────────────────
-  // Периодический JSON приходит с задержкой до сотен миллисекунд, и его sw_ms
-  // к моменту разбора уже устарел — синхронизироваться по нему значит стабильно
-  // отставать. Поэтому спрашиваем счётчик отдельным ping/pong и поправляем
-  // ответ на половину измеренного RTT.
+  // sw_ms из периодического JSON к моменту разбора уже устарел на сотни мс,
+  // поэтому счётчик спрашиваем отдельным ping/pong и правим на половину RTT.
   function swPing() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const seq = ++swPingSeq;
     swPingSent[seq] = performance.now();
     ws.send('ping:' + seq);
-    // Просроченные замеры не копим
     for (const k in swPingSent)
       if (performance.now() - swPingSent[k] > 5000) delete swPingSent[k];
   }
@@ -1346,16 +1342,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const now   = performance.now();
     const rtt   = now - t0;
     const state = parseInt(p[2], 10);
-    // Счётчик снят где-то внутри RTT; лучшая оценка — середина.
     const devNow = parseInt(p[3], 10) + rtt / 2;
 
-    // Минимум RTT — эталон качества связи, но с медленным «протуханием»,
-    // иначе один удачный замер навсегда забракует все последующие.
+    // Минимум RTT медленно «протухает», иначе один удачный замер
+    // навсегда забракует все последующие.
     if (swBestRtt === null || rtt < swBestRtt) swBestRtt = rtt; else swBestRtt += 2;
     setSwSync(rtt);
 
-    // Замер с явно распухшим RTT доверия не заслуживает — ждём следующего.
-    if (swBestRtt !== null && rtt > swBestRtt * 3 + 40) return;
+    if (swBestRtt !== null && rtt > swBestRtt * 3 + 40) return;   // замер испорчен
     if (now < swMuteUntil) return;
     if (state !== swUiState) { adoptStopwatch(state, parseInt(p[3], 10)); return; }
     if (state === 0) return;
@@ -1381,13 +1375,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                                   : 'synced with device · ' + Math.round(rtt) + ' ms rtt';
   }
 
-  // Грубая страховка на периодическом фрейме: ping/pong ведёт точную подстройку,
-  // а здесь ловим только развал состояния (сброс с другой вкладки, ребут часов).
+  // Точную подстройку ведёт ping/pong, здесь ловим только развал состояния
+  // (сброс с другой вкладки, ребут часов). На паузе счётчик заморожен,
+  // поэтому опоздавший фрейм всё равно несёт точное значение.
   function syncStopwatch(state, ms) {
     if (performance.now() < swMuteUntil) return;
     if (state !== swUiState) { adoptStopwatch(state, ms); return; }
-    // На паузе счётчик заморожен, поэтому даже опоздавший фрейм несёт
-    // точное значение — тут задержку компенсировать не нужно.
     if (state === 2 && Math.abs(ms - swAccum) >= SW_DEADBAND_MS) {
       swAccum = ms;
       swRender(ms);
