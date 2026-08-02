@@ -267,12 +267,18 @@ void handleNotFound() {
 
 // ─── Forward declarations ─────────────────────────────────
 void drawOLED();
+void drawStopwatchFrame();
+void invalidateSwLayout();
 
 // ─── Секундомер: приём команд ─────────────────────────────
 void swStart() {
     if (swState != SW_RUNNING) {
         swStartMs = millis();
         swState   = SW_RUNNING;
+        invalidateSwLayout();       // первый кадр после старта — полный
+        // Modem sleep задерживает доставку WS-пакетов до ~0.9 с: пока идёт
+        // отсчёт, это прямая ошибка синхронизации, поэтому радио не усыпляем.
+        WiFi.setSleep(false);
         Serial.println("Stopwatch START");
     }
 }
@@ -288,6 +294,8 @@ void swReset() {
     swAccumMs      = 0;
     swStartMs      = 0;
     prevTimeBuf[0] = '\0';          // заставляем перерисовать часы
+    invalidateSwLayout();
+    WiFi.setSleep(true);            // отсчёт кончился — возвращаем экономию
     Serial.println("Stopwatch RESET");
 }
 
@@ -300,6 +308,20 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
     } else if (type == WStype_TEXT) {
+        // "ping:<токен>" → "pong:<токен>:<state>:<elapsed>".
+        // Горячий путь замера задержки: ни логов, ни рассылки состояния —
+        // клиент по RTT вычисляет, каким был счётчик в момент приёма ответа.
+        if (length >= 5 && strncmp((char*)payload, "ping:", 5) == 0) {
+            size_t tokLen = length - 5;
+            if (tokLen > 12) tokLen = 12;
+            char reply[48];
+            snprintf(reply, sizeof(reply), "pong:%.*s:%d:%lu",
+                     (int)tokLen, (char*)payload + 5,
+                     (int)swState, (unsigned long)swElapsed());
+            webSocket.sendTXT(num, reply);
+            return;
+        }
+
         Serial.printf("WS #%d TEXT: %.*s\n", num, (int)length, (char*)payload);
         // Команды секундомера: "sw:start" / "sw:pause" / "sw:reset"
         if      (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) swStart();
@@ -433,6 +455,13 @@ static void drawBottomStatus(const char* prefix) {
 #endif
 
 // ─── Дисплей ─────────────────────────────────────────────
+// Геометрия поля ".mmm" последнего полного кадра секундомера.
+// swMsBoxX < 0 — данных нет, следующий кадр обязан быть полным.
+static int  swMsX = 0, swMsBoxX = -1, swMsBoxW = 0;
+static char swMmSs[6] = "";
+
+void invalidateSwLayout() { swMsBoxX = -1; }
+
 void drawOLED() {
 #if !HAS_DISPLAY
     return;
@@ -462,6 +491,15 @@ void drawOLED() {
         u8g2.drawStr(xMain, 50, mmss);
         u8g2.setFont(u8g2_font_logisoso24_tr);
         u8g2.drawStr(xMs, 50, msStr);
+
+        // Запоминаем геометрию поля ".mmm" — по ней идёт быстрая
+        // частичная перерисовка в drawStopwatchFrame().
+        swMsX    = xMs;
+        swMsBoxX = (xMs / 8) * 8;
+        int boxRight = ((xMs + msW + 7) / 8) * 8 + 8;   // +тайл запаса справа
+        if (boxRight > 256) boxRight = 256;
+        swMsBoxW = boxRight - swMsBoxX;
+        memcpy(swMmSs, full, 5);  swMmSs[5] = '\0';
 
         u8g2.drawHLine(0, 53, 256);
 
@@ -495,9 +533,40 @@ void drawOLED() {
         if (timeSynced) snprintf(pfx, sizeof(pfx), "%s  ", dayShortBuf);
         else            snprintf(pfx, sizeof(pfx), "%s", "");
         drawBottomStatus(pfx);
+        swMsBoxX = -1;                 // на часах поля ".mmm" нет
     }
 
     u8g2.sendBuffer();
+#endif
+}
+
+// Кадр секундомера. Полный кадр стоит ~24 мс (8 КБ буфера по SPI на 10 МГц),
+// поэтому гнать его 25 раз в секунду нельзя. Но между секундами меняется
+// только поле ".mmm" — его полоску (4 тайла по высоте) отправляем отдельно,
+// это ~2 мс, и миллисекунды идут плавно. Полный кадр — раз в секунду,
+// когда меняется "MM:SS" и нижняя строка состояния.
+void drawStopwatchFrame() {
+#if !HAS_DISPLAY
+    return;
+#else
+    if (!displayOn) return;
+
+    uint32_t el = swElapsed();
+    char full[16];
+    formatStopwatch(el, full, sizeof(full));
+
+    // >= 1 часа формат "HH:MM:SS" — миллисекунд нет, дробить нечего.
+    if (el >= 3600000UL || swMsBoxX < 0 || memcmp(full, swMmSs, 5) != 0) {
+        drawOLED();
+        return;
+    }
+
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(swMsBoxX, 24, swMsBoxW, 27);   // y 24..50, линию на y=53 не трогаем
+    u8g2.setDrawColor(1);
+    u8g2.setFont(u8g2_font_logisoso24_tr);
+    u8g2.drawStr(swMsX, 50, full + 5);
+    u8g2.updateDisplayArea(swMsBoxX / 8, 3, swMsBoxW / 8, 4);
 #endif
 }
 
@@ -539,6 +608,15 @@ void updateWeather() {
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+    // Serial здесь — нативный USB-CDC, и его write() блокирующий: пока хост
+    // держит порт открытым, но никто не вычитывает, буфер переполняется и
+    // Serial.printf() встаёт на секунды, останавливая весь loop(). Именно так
+    // секундомер и отставал от браузера на несколько секунд. Нулевой таймаут —
+    // лишний вывод молча теряется, зато отсчёт времени больше не зависит от
+    // того, открыт ли монитор.
+    Serial.setTxTimeoutMs(0);
+#endif
     delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
 
     Serial.println("\n=== ESP32-C6 Clock + Weather boot ===");
@@ -602,7 +680,7 @@ void loop() {
         uint32_t nowMs = millis();
         if (nowMs - lastSwDraw >= SW_DRAW_INTERVAL_MS) {
             lastSwDraw = nowMs;
-            drawOLED();
+            drawStopwatchFrame();
         }
         // Часы/аптайм в браузере: broadcastState раз в секунду
         if (strcmp(timeBuf, prevTimeBuf) != 0) {

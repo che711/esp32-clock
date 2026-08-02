@@ -984,6 +984,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     ws = new WebSocket('ws://' + location.hostname + ':81/');
     ws.onopen    = () => { setWsStatus(true); clearTimeout(wsReconnectTimer); logEvent('ok', 'WebSocket connected'); };
     ws.onmessage = (e) => {
+      if (typeof e.data === 'string' && e.data.startsWith('pong:')) { swOnPong(e.data); return; }
       try {
         const d = JSON.parse(e.data);
         if (!sawFirstFrame) { sawFirstFrame = true; logEvent('info', 'Telemetry stream started'); }
@@ -1290,37 +1291,107 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let swServerSynced = false;
   let swUiState      = 0;   // что показываем сейчас: 0=idle, 1=running, 2=paused
   let swMuteUntil    = 0;   // после своей команды даём устройству догнать нас
+  let swPingSeq      = 0;
+  let swPingSent     = {};  // seq -> момент отправки
+  let swPingTimer    = null;
+  let swBestRtt      = null;
 
-  const SW_DEADBAND_MS = 60;    // меньше — не дёргаем, всё равно не видно
-  const SW_SNAP_MS     = 500;   // больше — прыгаем на серверное значение сразу
-  const SW_SLEW        = 0.35;  // иначе подтягиваем плавно, доля расхождения за фрейм
-  const SW_MUTE_MS     = 1500;  // окно, пока в эфире могут быть дофреймы со старым состоянием
+  const SW_DEADBAND_MS = 40;    // меньше — не дёргаем, всё равно не видно
+  const SW_SNAP_MS     = 400;   // больше — прыгаем на серверное значение сразу
+  const SW_SLEW        = 0.4;   // иначе подтягиваем плавно, доля расхождения за замер
+  const SW_MUTE_MS     = 1200;  // окно, пока своя команда ещё летит к устройству
+  const SW_PING_MS     = 2000;  // период замера задержки на ходу
 
   function swSend(cmd) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
     swMuteUntil = performance.now() + SW_MUTE_MS;
   }
 
-  // Подстройка под устройство на каждом телеметрическом фрейме (~1 Гц).
-  // RAF продолжает рисовать миллисекунды между фреймами, а мы лишь убираем
-  // накопленный сдвиг — поэтому дисплей и вкладка не расходятся.
-  function syncStopwatch(state, ms) {
-    if (performance.now() < swMuteUntil) return;   // свой Start/Pause ещё в полёте
-    if (state !== swUiState) { adoptStopwatch(state, ms); return; }
+  // ── Замер задержки ────────────────────────────────────
+  // Периодический JSON приходит с задержкой до сотен миллисекунд, и его sw_ms
+  // к моменту разбора уже устарел — синхронизироваться по нему значит стабильно
+  // отставать. Поэтому спрашиваем счётчик отдельным ping/pong и поправляем
+  // ответ на половину измеренного RTT.
+  function swPing() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const seq = ++swPingSeq;
+    swPingSent[seq] = performance.now();
+    ws.send('ping:' + seq);
+    // Просроченные замеры не копим
+    for (const k in swPingSent)
+      if (performance.now() - swPingSent[k] > 5000) delete swPingSent[k];
+  }
+
+  function swPingStart() {
+    if (swPingTimer) return;
+    swBestRtt = null;
+    swPing();
+    swPingTimer = setInterval(swPing, SW_PING_MS);
+  }
+  function swPingStop() {
+    clearInterval(swPingTimer);
+    swPingTimer = null;
+    swPingSent  = {};
+    setSwSync(null);
+  }
+
+  // "pong:<seq>:<state>:<elapsed>"
+  function swOnPong(text) {
+    const p = text.split(':');
+    if (p.length < 4) return;
+    const t0 = swPingSent[p[1]];
+    if (t0 === undefined) return;
+    delete swPingSent[p[1]];
+
+    const now   = performance.now();
+    const rtt   = now - t0;
+    const state = parseInt(p[2], 10);
+    // Счётчик снят где-то внутри RTT; лучшая оценка — середина.
+    const devNow = parseInt(p[3], 10) + rtt / 2;
+
+    // Минимум RTT — эталон качества связи, но с медленным «протуханием»,
+    // иначе один удачный замер навсегда забракует все последующие.
+    if (swBestRtt === null || rtt < swBestRtt) swBestRtt = rtt; else swBestRtt += 2;
+    setSwSync(rtt);
+
+    // Замер с явно распухшим RTT доверия не заслуживает — ждём следующего.
+    if (swBestRtt !== null && rtt > swBestRtt * 3 + 40) return;
+    if (now < swMuteUntil) return;
+    if (state !== swUiState) { adoptStopwatch(state, parseInt(p[3], 10)); return; }
     if (state === 0) return;
 
-    const local = swAccum + (swRunning ? performance.now() - swStartTs : 0);
-    const drift = ms - local;
+    const local = swAccum + (swRunning ? now - swStartTs : 0);
+    const drift = devNow - local;
     if (Math.abs(drift) < SW_DEADBAND_MS) return;
 
     // На паузе число неподвижно — правим разом и точно; на ходу плавно.
     if (state === 2 || Math.abs(drift) > SW_SNAP_MS) {
-      swAccum   = ms;
-      swStartTs = performance.now();
+      swAccum   = devNow;
+      swStartTs = now;
     } else {
       swAccum += drift * SW_SLEW;
     }
     if (!swRunning) swRender(swAccum);
+  }
+
+  function setSwSync(rtt) {
+    const el = document.getElementById('sw-sync');
+    if (!el) return;
+    el.textContent = rtt === null ? 'synced with device'
+                                  : 'synced with device · ' + Math.round(rtt) + ' ms rtt';
+  }
+
+  // Грубая страховка на периодическом фрейме: ping/pong ведёт точную подстройку,
+  // а здесь ловим только развал состояния (сброс с другой вкладки, ребут часов).
+  function syncStopwatch(state, ms) {
+    if (performance.now() < swMuteUntil) return;
+    if (state !== swUiState) { adoptStopwatch(state, ms); return; }
+    // На паузе счётчик заморожен, поэтому даже опоздавший фрейм несёт
+    // точное значение — тут задержку компенсировать не нужно.
+    if (state === 2 && Math.abs(ms - swAccum) >= SW_DEADBAND_MS) {
+      swAccum = ms;
+      swRender(ms);
+    }
   }
   function setSwHero(active) {
     document.body.classList.toggle('sw-active', active);
@@ -1343,6 +1414,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.classList.add('running');
       lapBtn.disabled = false;
       setSwHero(true);
+      swPingStart();
       swTick();
     } else if (state === 2) {
       swRunning = false;
@@ -1353,6 +1425,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.classList.remove('running');
       lapBtn.disabled = (ms <= 0);
       setSwHero(true);
+      swPingStop();
     } else {
       swRunning = false;
       swAccum   = 0;
@@ -1362,6 +1435,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       startBtn.classList.remove('running');
       lapBtn.disabled = true;
       setSwHero(false);
+      swPingStop();
     }
   }
 
@@ -1377,6 +1451,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       document.getElementById('sw-lap-btn').disabled = false;
       setSwHero(true);
       logEvent('info', 'Stopwatch started');
+      swPingStart();
       swTick();
     } else {
       swRunning = false;
@@ -1384,6 +1459,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       swAccum  += performance.now() - swStartTs;
       cancelAnimationFrame(swRafId);
       swSend('sw:pause');
+      swPingStop();
       startBtn.textContent = 'Resume';
       startBtn.classList.remove('running');
       logEvent('info', 'Stopwatch paused at ' + swFmt(swAccum));
@@ -1439,6 +1515,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     cancelAnimationFrame(swRafId);
     swRender(0);
     swSend('sw:reset');
+    swPingStop();
     setSwHero(false);
     document.getElementById('sw-start-btn').textContent = 'Start';
     document.getElementById('sw-start-btn').classList.remove('running');
