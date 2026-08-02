@@ -981,6 +981,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let ws, wsReconnectTimer, sawFirstFrame = false;
   function wsConnect() {
     swServerSynced = false;   // при новом коннекте заново берём состояние секундомера
+    setWsStatus(false);       // пока не подключились — кнопки заблокированы
     ws = new WebSocket('ws://' + location.hostname + ':81/');
     ws.onopen    = () => { setWsStatus(true); clearTimeout(wsReconnectTimer); logEvent('ok', 'WebSocket connected'); };
     ws.onmessage = (e) => {
@@ -1004,6 +1005,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('log-dot').className = cls;
     document.getElementById('ws-label').textContent      = ok ? 'Live' : 'Offline';
     document.getElementById('log-conn-label').textContent = ok ? 'Connected' : 'Disconnected';
+    // Без связи секундомером управлять нечем — кнопки гасим
+    document.getElementById('sw-start-btn').disabled = !ok;
+    document.getElementById('sw-reset-btn').disabled = !ok;
+    if (!ok) document.getElementById('sw-lap-btn').disabled = true;
   }
 
   // ── Полоса секунд ────────────────────────────────────
@@ -1301,9 +1306,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   const SW_MUTE_MS     = 1200;  // окно, пока своя команда ещё летит к устройству
   const SW_PING_MS     = 2000;  // период замера задержки на ходу
 
+  // Возвращает false, если связи нет: команду глотать молча нельзя, иначе
+  // вкладка считает, а устройство о секундомере не знает.
   function swSend(cmd) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(cmd);
     swMuteUntil = performance.now() + SW_MUTE_MS;
+    return true;
   }
 
   // ── Замер задержки ────────────────────────────────────
@@ -1435,10 +1444,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function swToggle() {
     const startBtn = document.getElementById('sw-start-btn');
     if (!swRunning) {
+      if (!swSend('sw:start')) { showToast('No link to the clock'); return; }
       swRunning = true;
       swUiState = 1;
       swStartTs = performance.now();
-      swSend('sw:start');
       startBtn.textContent = 'Pause';
       startBtn.classList.add('running');
       document.getElementById('sw-lap-btn').disabled = false;
@@ -1447,11 +1456,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       swPingStart();
       swTick();
     } else {
+      if (!swSend('sw:pause')) { showToast('No link to the clock'); return; }
       swRunning = false;
       swUiState = 2;
       swAccum  += performance.now() - swStartTs;
       cancelAnimationFrame(swRafId);
-      swSend('sw:pause');
       swPingStop();
       startBtn.textContent = 'Resume';
       startBtn.classList.remove('running');
@@ -1499,6 +1508,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
 
   function swReset() {
+    if (!swSend('sw:reset')) { showToast('No link to the clock'); return; }
     swRunning   = false;
     swUiState   = 0;
     swAccum     = 0;
@@ -1507,7 +1517,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     swLaps      = [];
     cancelAnimationFrame(swRafId);
     swRender(0);
-    swSend('sw:reset');
     swPingStop();
     setSwHero(false);
     document.getElementById('sw-start-btn').textContent = 'Start';
