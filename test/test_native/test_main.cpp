@@ -5,6 +5,7 @@
 #include "../../src/battery_calc.h"
 #include "../../src/weather_calc.h"
 #include "../../src/stopwatch.h"
+#include "../../src/origin_check.h"
 
 // ─── Uptime ───────────────────────────────────────────────
 void test_uptime_seconds_only() {
@@ -448,6 +449,86 @@ void test_forecast_boundaries() {
     TEST_ASSERT_EQUAL_UINT8(3, forecastFromTrend(-0.51f, 3));
 }
 
+// ─── Origin изменяющих запросов ───────────────────────────
+static const char* IP   = "192.168.1.42";
+static const char* HOST = "clock";
+
+void test_origin_own_mdns_name() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://clock.local", IP, HOST));
+}
+
+void test_origin_own_ip() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://192.168.1.42", IP, HOST));
+}
+
+// Браузер порт по умолчанию не пишет, но явный :80 — тот же самый origin
+void test_origin_explicit_port_80() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://clock.local:80", IP, HOST));
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://192.168.1.42:80", IP, HOST));
+}
+
+void test_origin_hostname_without_suffix() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://clock", IP, HOST));
+}
+
+// Регистр хоста значения не имеет
+void test_origin_case_insensitive_host() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://CLOCK.local", IP, HOST));
+}
+
+void test_origin_foreign_site() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://evil.com", IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("https://evil.com", IP, HOST));
+}
+
+// Главная ловушка: сравнивать хост по префиксу нельзя
+void test_origin_rejects_suffix_trick() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.local.evil.com", IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://192.168.1.42.evil.com", IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://notclock.local", IP, HOST));
+}
+
+// Соседнее устройство в той же сети — тоже чужой origin
+void test_origin_rejects_neighbour_ip() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://192.168.1.43", IP, HOST));
+}
+
+// https нам взяться неоткуда: сертификата у устройства нет
+void test_origin_rejects_https_own_name() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("https://clock.local", IP, HOST));
+}
+
+// Песочница iframe и file:// шлют строку "null"
+void test_origin_rejects_null_literal() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("null", IP, HOST));
+}
+
+void test_origin_rejects_empty_and_garbage() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("", IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice(nullptr, IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://", IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("clock.local", IP, HOST));
+}
+
+// Другой порт — по правилам origin это другой источник
+void test_origin_rejects_other_port() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.local:8080", IP, HOST));
+}
+
+// До подключения к сети IP ещё пуст — имя всё равно должно работать,
+// а пустая строка не должна совпадать со всем подряд
+void test_origin_without_known_ip() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://clock.local", "", HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://192.168.1.42", "", HOST));
+}
+
+// Слишком длинный хост не должен переполнить буфер разбора
+void test_origin_rejects_overlong_host() {
+    char origin[200];
+    snprintf(origin, sizeof(origin), "http://%0*d", 150, 0);
+    TEST_ASSERT_FALSE(originIsLocalDevice(origin, IP, HOST));
+}
+
 // ─── JSON ─────────────────────────────────────────────────
 void test_json_contains_time_key() {
     const char* json = "{\"time\":\"12:00:00\",\"date\":\"10 MAY 2026\"}";
@@ -551,6 +632,21 @@ int main(int argc, char** argv) {
     RUN_TEST(test_forecast_variable);
     RUN_TEST(test_forecast_rain);
     RUN_TEST(test_forecast_boundaries);
+
+    RUN_TEST(test_origin_own_mdns_name);
+    RUN_TEST(test_origin_own_ip);
+    RUN_TEST(test_origin_explicit_port_80);
+    RUN_TEST(test_origin_hostname_without_suffix);
+    RUN_TEST(test_origin_case_insensitive_host);
+    RUN_TEST(test_origin_foreign_site);
+    RUN_TEST(test_origin_rejects_suffix_trick);
+    RUN_TEST(test_origin_rejects_neighbour_ip);
+    RUN_TEST(test_origin_rejects_https_own_name);
+    RUN_TEST(test_origin_rejects_null_literal);
+    RUN_TEST(test_origin_rejects_empty_and_garbage);
+    RUN_TEST(test_origin_rejects_other_port);
+    RUN_TEST(test_origin_without_known_ip);
+    RUN_TEST(test_origin_rejects_overlong_host);
 
     RUN_TEST(test_json_contains_time_key);
     RUN_TEST(test_json_contains_date_key);
