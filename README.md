@@ -367,8 +367,12 @@ pio test -e native
 platformio.ini            pioarduino (C6) + U8g2 + WebSockets + BMP280 + PubSubClient
 src/
 ├─ config.h               ← все настройки и карта пинов
-├─ main.cpp               часы, веб, WebSocket, секундомер, интеграция метео/LED/MQTT
-├─ clock_utils.h          хелперы (покрыты тестами)
+├─ main.cpp               жизненный цикл: WiFi, NTP, опрос датчиков, LED, loop()
+├─ app.h                  общее состояние прошивки (владелец — main.cpp)
+├─ display.h/.cpp         OLED: раскладка кадра, яркость, питание
+├─ web_api.h/.cpp         HTTP :80 + WebSocket :81, сборка JSON
+├─ stopwatch.h            автомат секундомера (покрыт тестами)
+├─ clock_utils.h          хелперы форматирования (покрыты тестами)
 ├─ sensor.h/.cpp          BMP280: чтение датчика
 ├─ weather_calc.h         арифметика метео: тренд, прогноз, QNH (покрыто тестами)
 ├─ battery.h/.cpp         18650 через делитель напряжения

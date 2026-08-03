@@ -1,0 +1,241 @@
+#include "web_api.h"
+#include "config.h"
+#include "app.h"
+#include "display.h"
+#include "clock_utils.h"
+#include <WiFi.h>
+#include <WebServer.h>
+#include <WebSocketsServer.h>
+#include "web_ui_gz.h"   // генерируется из web/index.html при сборке
+
+// ============================================================
+//  web_api.cpp — веб-сервер, WebSocket и сборка JSON.
+// ============================================================
+
+static WebServer        server(80);
+static WebSocketsServer webSocket(81);
+static uint32_t         requestCount = 0;
+
+// ─── JSON ─────────────────────────────────────────────────
+static void buildJson(char* buf, size_t sz) {
+    char uptimeBuf[32];
+    formatUptime(millis() / 1000, uptimeBuf, sizeof(uptimeBuf));
+    snprintf(buf, sz,
+        "{"
+        "\"time\":\"%s\","
+        "\"date\":\"%s\","
+        "\"day\":\"%s\","
+        "\"uptime\":\"%s\","
+        "\"ssid\":\"%s\","
+        "\"ip\":\"%s\","
+        "\"rssi\":%d,"
+        "\"temp\":\"%.1f\","
+        "\"clients\":%d,"
+        "\"ram_free\":%lu,"
+        "\"ram_total\":%lu,"
+        "\"brightness_pct\":%d,"
+        "\"brightness_label\":\"%s\","
+        "\"brightness_manual\":%s,"
+        "\"display_on\":%s,"
+        "\"sw_state\":%d,"
+        "\"sw_ms\":%lu,"
+        "\"bmp_valid\":%s,"
+        "\"bmp_temp\":%.2f,"
+        "\"pressure\":%.2f,"
+        "\"pressure_mmhg\":%.1f,"
+        "\"altitude\":%.1f,"
+        "\"trend\":%.2f,"
+        "\"forecast\":%d,"
+        "\"bat_valid\":%s,"
+        "\"bat_pct\":%d,"
+        "\"bat_v\":%.2f,"
+        "\"bat_low\":%s,"
+        "\"requests\":%lu"
+        "}",
+        timeBuf, dateBuf, dayFullBuf,
+        uptimeBuf,
+        WIFI_SSID, localIP.c_str(),
+        (int)WiFi.RSSI(),
+        (float)dieTempC(),
+        (int)webSocket.connectedClients(),
+        (unsigned long)esp_get_free_heap_size(),
+        (unsigned long)ESP.getHeapSize(),
+        brightnessPct(displayContrast()),
+        displayBrightnessLabel(),
+        displayIsManual() ? "true" : "false",
+        displayIsOn()     ? "true" : "false",
+        (int)stopwatch.state,
+        (unsigned long)stopwatch.elapsed(millis()),
+        weather.valid ? "true" : "false",
+        weather.temperature,
+        weather.pressure,
+        weather.pressureMmHg,
+        weather.altitude,
+        weather.pressureTrend,
+        (int)weather.forecastIcon,
+        battery.valid ? "true" : "false",
+        (int)battery.percent,
+        battery.voltage,
+        battery.low ? "true" : "false",
+        (unsigned long)requestCount
+    );
+}
+
+void webApiBroadcast() {
+    if (webSocket.connectedClients() == 0) return;  // некому слать — не тратим CPU
+    char json[1024];
+    buildJson(json, sizeof(json));
+    webSocket.broadcastTXT(json);
+}
+
+// ─── HTTP ─────────────────────────────────────────────────
+static void handleRoot() {
+    requestCount++;
+    // Страница лежит во флеше уже сжатой — распаковывает её браузер.
+    // 75 КБ → 17 КБ и по сети, и во флеше.
+    server.sendHeader("Content-Encoding", "gzip");
+    server.send_P(200, "text/html", (PGM_P)INDEX_HTML_GZ, INDEX_HTML_GZ_LEN);
+}
+
+static void handleApiStats() {
+    requestCount++;
+    char json[1024];
+    buildJson(json, sizeof(json));
+    server.send(200, "application/json", json);
+}
+
+static void handleApiTime() {
+    requestCount++;
+    char uptimeBuf[32];
+    formatUptime(millis() / 1000, uptimeBuf, sizeof(uptimeBuf));
+    char json[256];
+    snprintf(json, sizeof(json),
+        "{\"time\":\"%s\",\"date\":\"%s\",\"day\":\"%s\","
+        "\"uptime\":\"%s\",\"timestamp\":%lu}",
+        timeBuf, dateBuf, dayFullBuf,
+        uptimeBuf, (unsigned long)time(nullptr));
+    server.send(200, "application/json", json);
+}
+
+static void handleApiWeather() {
+    requestCount++;
+    char json[320];
+    snprintf(json, sizeof(json),
+        "{\"valid\":%s,\"temperature\":%.2f,\"pressure\":%.2f,"
+        "\"pressure_mmhg\":%.1f,\"altitude\":%.1f,\"qnh\":%.2f,"
+        "\"air_density\":%.4f,\"trend\":%.2f,\"forecast\":%d,"
+        "\"battery_valid\":%s,\"battery_pct\":%d,\"battery_v\":%.2f}",
+        weather.valid ? "true" : "false",
+        weather.temperature, weather.pressure, weather.pressureMmHg,
+        weather.altitude, weather.pressureQnh, weather.airDensity,
+        weather.pressureTrend, (int)weather.forecastIcon,
+        battery.valid ? "true" : "false",
+        (int)battery.percent, battery.voltage);
+    server.send(200, "application/json", json);
+}
+
+static void handleApiBrightness() {
+    requestCount++;
+    if (server.hasArg("auto")) {
+        displaySetAuto();
+        server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
+        applyAutoBrightness();       // сразу применяем авто-уровень
+        webApiBroadcast();
+        return;
+    }
+    if (server.hasArg("value")) {
+        int pct = constrain(server.arg("value").toInt(), 0, 100);
+        displaySetManualPct(pct);
+        char resp[64];
+        snprintf(resp, sizeof(resp),
+                 "{\"ok\":true,\"mode\":\"manual\",\"pct\":%d}", pct);
+        server.send(200, "application/json", resp);
+        webApiBroadcast();
+        return;
+    }
+    server.send(400, "application/json", "{\"error\":\"missing value or auto\"}");
+}
+
+static void handleApiPower() {
+    requestCount++;
+    if (server.hasArg("on")) {
+        bool on = server.arg("on") != "0";
+        displaySetPower(on);
+        char resp[48];
+        snprintf(resp, sizeof(resp),
+                 "{\"ok\":true,\"display_on\":%s}", on ? "true" : "false");
+        server.send(200, "application/json", resp);
+        webApiBroadcast();
+        return;
+    }
+    server.send(400, "application/json", "{\"error\":\"missing on param\"}");
+}
+
+static void handleReboot() {
+    requestCount++;
+    server.send(200, "text/plain", "Rebooting...");
+    delay(300);
+    ESP.restart();
+}
+
+static void handleNotFound() {
+    requestCount++;
+    server.send(404, "text/plain", "Not found");
+}
+
+// ─── WebSocket ────────────────────────────────────────────
+static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+    if (type == WStype_CONNECTED) {
+        requestCount++;
+        char json[1024];
+        buildJson(json, sizeof(json));
+        webSocket.sendTXT(num, json);
+        Serial.printf("WS client #%d connected\n", num);
+    } else if (type == WStype_TEXT) {
+        // Замер задержки: без логов и рассылки, иначе исказим RTT.
+        if (length >= 5 && strncmp((char*)payload, "ping:", 5) == 0) {
+            size_t tokLen = length - 5;
+            if (tokLen > 12) tokLen = 12;
+            char reply[48];
+            snprintf(reply, sizeof(reply), "pong:%.*s:%d:%lu",
+                     (int)tokLen, (char*)payload + 5,
+                     (int)stopwatch.state,
+                     (unsigned long)stopwatch.elapsed(millis()));
+            webSocket.sendTXT(num, reply);
+            return;
+        }
+
+        Serial.printf("WS #%d TEXT: %.*s\n", num, (int)length, (char*)payload);
+        // Команды секундомера: "sw:start" / "sw:pause" / "sw:reset"
+        if      (length >= 8 && strncmp((char*)payload, "sw:start", 8) == 0) swStart();
+        else if (length >= 8 && strncmp((char*)payload, "sw:pause", 8) == 0) swPause();
+        else if (length >= 8 && strncmp((char*)payload, "sw:reset", 8) == 0) swReset();
+        webApiBroadcast();          // мгновенно рассылаем новое состояние
+    }
+}
+
+// ─── Публичный API ────────────────────────────────────────
+void webApiBegin() {
+    server.on("/",               HTTP_GET,  handleRoot);
+    server.on("/api/stats",      HTTP_GET,  handleApiStats);
+    server.on("/api/time",       HTTP_GET,  handleApiTime);
+    server.on("/api/weather",    HTTP_GET,  handleApiWeather);
+    server.on("/api/brightness", HTTP_POST, handleApiBrightness);
+    server.on("/api/power",      HTTP_POST, handleApiPower);
+    server.on("/api/reboot",     HTTP_POST, handleReboot);
+    server.onNotFound(handleNotFound);
+    server.begin();
+
+    webSocket.begin();
+    webSocket.onEvent(webSocketEvent);
+
+    Serial.println("HTTP :80  WS :81");
+}
+
+void webApiLoop() {
+    server.handleClient();
+    webSocket.loop();
+}
+
+uint8_t  webApiClientCount()  { return webSocket.connectedClients(); }
+uint32_t webApiRequestCount() { return requestCount; }

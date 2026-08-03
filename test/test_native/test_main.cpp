@@ -4,6 +4,7 @@
 #include "../../src/clock_utils.h"
 #include "../../src/battery_calc.h"
 #include "../../src/weather_calc.h"
+#include "../../src/stopwatch.h"
 
 // ─── Uptime ───────────────────────────────────────────────
 void test_uptime_seconds_only() {
@@ -197,6 +198,95 @@ void test_stopwatch_split_layout() {
     }
 }
 
+// ─── Секундомер: автомат ──────────────────────────────────
+void test_sw_starts_idle() {
+    Stopwatch sw;
+    TEST_ASSERT_TRUE(sw.idle());
+    TEST_ASSERT_FALSE(sw.running());
+    TEST_ASSERT_EQUAL_UINT32(0, sw.elapsed(123456));
+}
+
+void test_sw_runs_from_start_moment() {
+    Stopwatch sw;
+    TEST_ASSERT_TRUE(sw.start(1000));
+    TEST_ASSERT_TRUE(sw.running());
+    TEST_ASSERT_EQUAL_UINT32(0,    sw.elapsed(1000));
+    TEST_ASSERT_EQUAL_UINT32(2500, sw.elapsed(3500));
+}
+
+// Повторный старт не должен сбивать точку отсчёта
+void test_sw_restart_is_noop() {
+    Stopwatch sw;
+    sw.start(1000);
+    TEST_ASSERT_FALSE(sw.start(5000));
+    TEST_ASSERT_EQUAL_UINT32(4000, sw.elapsed(5000));
+}
+
+void test_sw_pause_freezes() {
+    Stopwatch sw;
+    sw.start(1000);
+    TEST_ASSERT_TRUE(sw.pause(4000));
+    TEST_ASSERT_EQUAL_UINT32(3000, sw.elapsed(4000));
+    TEST_ASSERT_EQUAL_UINT32(3000, sw.elapsed(999999));   // время идёт, счётчик — нет
+}
+
+void test_sw_pause_when_not_running() {
+    Stopwatch sw;
+    TEST_ASSERT_FALSE(sw.pause(1000));       // на месте
+    sw.start(1000);
+    sw.pause(2000);
+    TEST_ASSERT_FALSE(sw.pause(3000));       // уже на паузе
+    TEST_ASSERT_EQUAL_UINT32(1000, sw.elapsed(3000));
+}
+
+// Возобновление продолжает счёт с накопленного, а не с нуля
+void test_sw_resume_accumulates() {
+    Stopwatch sw;
+    sw.start(1000);
+    sw.pause(3000);                          // накоплено 2000
+    TEST_ASSERT_TRUE(sw.start(10000));
+    TEST_ASSERT_EQUAL_UINT32(2000, sw.elapsed(10000));
+    TEST_ASSERT_EQUAL_UINT32(2500, sw.elapsed(10500));
+    sw.pause(11000);
+    TEST_ASSERT_EQUAL_UINT32(3000, sw.elapsed(99999));
+}
+
+void test_sw_reset_clears() {
+    Stopwatch sw;
+    sw.start(1000);
+    sw.pause(5000);
+    sw.reset();
+    TEST_ASSERT_TRUE(sw.idle());
+    TEST_ASSERT_EQUAL_UINT32(0, sw.elapsed(9000));
+    // после сброса запускается как новый
+    sw.start(20000);
+    TEST_ASSERT_EQUAL_UINT32(1000, sw.elapsed(21000));
+}
+
+void test_sw_reset_while_running() {
+    Stopwatch sw;
+    sw.start(1000);
+    sw.reset();
+    TEST_ASSERT_TRUE(sw.idle());
+    TEST_ASSERT_EQUAL_UINT32(0, sw.elapsed(50000));
+}
+
+// millis() переполняется каждые ~49 суток; беззнаковая арифметика
+// обязана пережить это без скачка показаний
+void test_sw_survives_millis_overflow() {
+    Stopwatch sw;
+    sw.start(0xFFFFF000UL);
+    TEST_ASSERT_EQUAL_UINT32(0x1100UL, sw.elapsed(0x00000100UL));
+}
+
+// Веб-интерфейс получает состояние числом в поле sw_state —
+// значения менять нельзя, иначе кнопки в браузере поедут
+void test_sw_state_codes_are_stable() {
+    TEST_ASSERT_EQUAL_UINT8(0, (uint8_t)Stopwatch::IDLE);
+    TEST_ASSERT_EQUAL_UINT8(1, (uint8_t)Stopwatch::RUNNING);
+    TEST_ASSERT_EQUAL_UINT8(2, (uint8_t)Stopwatch::PAUSED);
+}
+
 // ─── Батарея ──────────────────────────────────────────────
 void test_battery_full() {
     TEST_ASSERT_EQUAL_UINT8(100, batteryVoltageToPercent(4.20f));
@@ -376,6 +466,7 @@ void test_json_missing_key() {
 
 // ─── Runner ───────────────────────────────────────────────
 int main(int argc, char** argv) {
+    (void)argc; (void)argv;
     UNITY_BEGIN();
 
     RUN_TEST(test_uptime_seconds_only);
@@ -418,6 +509,17 @@ int main(int argc, char** argv) {
     RUN_TEST(test_stopwatch_hours);
     RUN_TEST(test_stopwatch_many_hours);
     RUN_TEST(test_stopwatch_split_layout);
+
+    RUN_TEST(test_sw_starts_idle);
+    RUN_TEST(test_sw_runs_from_start_moment);
+    RUN_TEST(test_sw_restart_is_noop);
+    RUN_TEST(test_sw_pause_freezes);
+    RUN_TEST(test_sw_pause_when_not_running);
+    RUN_TEST(test_sw_resume_accumulates);
+    RUN_TEST(test_sw_reset_clears);
+    RUN_TEST(test_sw_reset_while_running);
+    RUN_TEST(test_sw_survives_millis_overflow);
+    RUN_TEST(test_sw_state_codes_are_stable);
 
     RUN_TEST(test_battery_full);
     RUN_TEST(test_battery_above_full);
