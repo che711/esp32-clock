@@ -76,7 +76,7 @@ OLED разведён на правый ряд одним шлейфом: SPI �
 | --- | --- | --- |
 | 1 | GND | **GND** |
 | 2 | VCC | **3V3** |
-| 3 | NC | не подключать |
+| 3 | NC | **NC** |
 | 4 | SCLK | **GPIO18** |
 | 5 | SDIN | **GPIO19** |
 | 6–11 | D2–D7 | **GND** |
@@ -367,13 +367,25 @@ pio test -e native
 platformio.ini            pioarduino (C6) + U8g2 + WebSockets + BMP280 + PubSubClient
 src/
 ├─ config.h               ← все настройки и карта пинов
-├─ main.cpp               часы, веб, WebSocket, секундомер, интеграция метео/LED/MQTT
-├─ web_ui.h               дашборд (HTML/CSS/JS в PROGMEM)
-├─ clock_utils.h          хелперы (покрыты тестами)
-├─ sensor.h/.cpp          BMP280 + производные величины, тренд, прогноз
+├─ main.cpp               жизненный цикл: WiFi, NTP, опрос датчиков, LED, loop()
+├─ app.h                  общее состояние прошивки (владелец — main.cpp)
+├─ display.h/.cpp         OLED: раскладка кадра, яркость, питание
+├─ web_api.h/.cpp         HTTP :80 + WebSocket :81, сборка JSON
+├─ stopwatch.h            автомат секундомера (покрыт тестами)
+├─ clock_utils.h          хелперы форматирования (покрыты тестами)
+├─ sensor.h/.cpp          BMP280: чтение датчика
+├─ weather_calc.h         арифметика метео: тренд, прогноз, QNH (покрыто тестами)
 ├─ battery.h/.cpp         18650 через делитель напряжения
+├─ battery_calc.h         кривая разряда Li-ion (покрыто тестами)
 └─ mqtt.h/.cpp            MQTT + Home Assistant Discovery
+web/
+└─ index.html             дашборд; при сборке жмётся в gzip и уходит во флеш
+scripts/
+└─ gen_web_ui.py          web/index.html → $BUILD_DIR/generated/web_ui_gz.h
 ```
+
+Дашборд не тянет ничего из интернета: шрифты только системные, поэтому
+страница одинаково открывается и в сети без выхода наружу.
 
 ---
 

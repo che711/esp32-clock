@@ -1,10 +1,16 @@
 name: CI
 
+# Собираем каждую ветку, а не только main/develop: иначе поломка доезжает
+# до PR (так и уехало переименование окружения esp32-c3-super-mini → esp32c6).
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ '**' ]
   pull_request:
-    branches: [ main, master ]
+
+# Новый пуш в ветку отменяет ещё не закончившийся прогон по старому коммиту.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
@@ -51,15 +57,15 @@ jobs:
         run: pip install platformio
 
       - name: Build firmware
-        run: pio run -e esp32-c3-super-mini
+        run: pio run -e esp32c6
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v6
         with:
           name: firmware-${{ github.sha }}
           path: |
-            .pio/build/esp32-c3-super-mini/firmware.bin
-            .pio/build/esp32-c3-super-mini/firmware.elf
+            .pio/build/esp32c6/firmware.bin
+            .pio/build/esp32c6/firmware.elf
           retention-days: 30
 
   lint:
@@ -71,6 +77,10 @@ jobs:
       - name: Install cppcheck
         run: sudo apt-get install -y cppcheck
 
+      # Проверяем весь src/, а не пару файлов: раньше main.cpp, sensor.cpp,
+      # battery.cpp и mqtt.cpp не смотрел никто.
+      # cstyleCast — по всему Arduino-API (payload у WebSockets это uint8_t*,
+      # приведения к char* неизбежны), поэтому подавлен осознанно.
       - name: Run cppcheck
         run: |
           cppcheck \
@@ -78,8 +88,8 @@ jobs:
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
             --suppress=invalidPrintfArgType_sint \
+            --suppress=cstyleCast \
             --error-exitcode=1 \
             --inline-suppr \
-            src/clock_utils.h \
+            src/ \
             test/test_native/test_main.cpp
-            

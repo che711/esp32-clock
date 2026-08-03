@@ -1,13 +1,10 @@
 #pragma once
 #include <Arduino.h>
+#include "weather_calc.h"   // PRESSURE_HISTORY_SIZE + чистая арифметика
 
 // ============================================================
 //  sensor.h  —  BMP280 данные + производные расчёты
 // ============================================================
-
-// История давления для расчёта тренда:
-// 12 точек × 5 мин (PRESSURE_HISTORY_INTERVAL_MS) = окно в 1 час
-#define PRESSURE_HISTORY_SIZE 12
 
 struct SensorData {
     // Сырые данные
