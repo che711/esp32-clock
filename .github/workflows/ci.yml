@@ -51,15 +51,15 @@ jobs:
         run: pip install platformio
 
       - name: Build firmware
-        run: pio run -e esp32-c3-super-mini
+        run: pio run -e esp32c6
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v6
         with:
           name: firmware-${{ github.sha }}
           path: |
-            .pio/build/esp32-c3-super-mini/firmware.bin
-            .pio/build/esp32-c3-super-mini/firmware.elf
+            .pio/build/esp32c6/firmware.bin
+            .pio/build/esp32c6/firmware.elf
           retention-days: 30
 
   lint:
