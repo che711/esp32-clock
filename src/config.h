@@ -66,6 +66,14 @@
 // ── Интервалы ────────────────────────────────────────────────
 #define SENSOR_INTERVAL_MS   10000UL  // опрос BMP280
 #define SW_DRAW_INTERVAL_MS     40UL  // кадр секундомера, 25 fps
+
+// Пауза в конце loop(). Задаёт задержку отклика на HTTP-запрос и на
+// команду из браузера: пакет ждёт следующего оборота цикла.
+// 20 мс вместо прежних 100 — заметно живее веб-интерфейс, а расход
+// не меняется: тик FreeRTOS всё равно идёт каждую миллисекунду,
+// и пустой оборот стоит десятки микросекунд против радио WiFi.
+#define LOOP_IDLE_MS            20UL
+#define LOOP_STOPWATCH_MS        5UL  // на ходу — короче, счётчик тикает 25 fps
 #define MQTT_INTERVAL_MS     30000UL  // публикация MQTT (≥ SENSOR_INTERVAL)
 #define MQTT_RECONNECT_MS     5000UL
 #define PRESSURE_HISTORY_INTERVAL_MS 300000UL  // точка истории давления (5 мин)

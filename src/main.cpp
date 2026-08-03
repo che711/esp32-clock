@@ -28,8 +28,9 @@ char   dayFullBuf[12];
 bool   timeSynced = false;
 String localIP    = "";
 
-static char     prevTimeBuf[9] = "";
-static uint32_t lastSensorMs   = 0;
+static uint32_t lastSensorMs = 0;
+// Взводится, когда кадр надо перерисовать не дожидаясь смены секунды
+static bool     forceRedraw  = false;
 
 static const char* DAYS_SHORT[] = { "SUN","MON","TUE","WED","THU","FRI","SAT" };
 static const char* DAYS_FULL[]  = { "Sunday","Monday","Tuesday","Wednesday",
@@ -88,7 +89,7 @@ void swPause() {
 
 void swReset() {
     stopwatch.reset();
-    prevTimeBuf[0] = '\0';              // заставляем перерисовать часы
+    forceRedraw = true;                 // вернуть часы на экран сразу, а не через секунду
     displayInvalidateStopwatch();
     setRadioSaving(true);
     Serial.println("Stopwatch RESET");
@@ -157,7 +158,22 @@ static void maintainNetwork() {
 }
 
 // ─── Буферы времени ───────────────────────────────────────
-static void updateTimeStrings() {
+// Возвращает true, когда строки изменились — то есть ровно раз в секунду.
+//
+// Дешёвая проверка time() спереди стоит того: во время отсчёта секундомера
+// loop() крутится 200 раз в секунду, и без неё каждый оборот тратился бы на
+// четыре snprintf и localtime_r внутри getLocalTime. Пока время не
+// синхронизировано, getLocalTime к тому же добирает свои delay(10)
+// на каждом вызове — теперь это раз в секунду, а не 200.
+static bool updateTimeStrings() {
+    static time_t lastEpoch = 0;
+    static bool   rendered  = false;
+
+    time_t now = time(nullptr);
+    if (rendered && now == lastEpoch) return false;
+    lastEpoch = now;
+    rendered  = true;
+
     struct tm t;
     if (getLocalTime(&t, 0)) {
         snprintf(timeBuf,     sizeof(timeBuf),
@@ -172,6 +188,7 @@ static void updateTimeStrings() {
         snprintf(dayShortBuf, sizeof(dayShortBuf), "---");
         snprintf(dayFullBuf,  sizeof(dayFullBuf),  "---");
     }
+    return true;
 }
 
 // ─── Метео: опрос датчика + индикация LED ────────────────
@@ -251,13 +268,9 @@ void loop() {
     webApiLoop();
     maintainNetwork();
     updateWeather();          // BMP280 + батарея по таймеру + LED
-    updateTimeStrings();
 
-    bool secondChanged = strcmp(timeBuf, prevTimeBuf) != 0;
-    if (secondChanged) {
-        strncpy(prevTimeBuf, timeBuf, sizeof(prevTimeBuf) - 1);
-        prevTimeBuf[sizeof(prevTimeBuf) - 1] = '\0';
-    }
+    bool frameDue = updateTimeStrings() || forceRedraw;
+    forceRedraw = false;
 
     if (stopwatch.running()) {
         static uint32_t lastSwDraw = 0;
@@ -267,11 +280,11 @@ void loop() {
             displayStopwatchFrame();
         }
         // Часы/аптайм в браузере: broadcast раз в секунду
-        if (secondChanged) {
+        if (frameDue) {
             applyAutoBrightness();
             webApiBroadcast();
         }
-    } else if (secondChanged) {
+    } else if (frameDue) {
         applyAutoBrightness();
         displayDraw();
         webApiBroadcast();
@@ -299,7 +312,7 @@ void loop() {
                       battery.valid ? battery.percent : -1);
     }
 
-    // Короткий цикл только на ходу: иначе команда стоит в очереди до 100 мс
+    // Короткий цикл на ходу: иначе команда стоит в очереди до конца паузы
     // и устройство стартует заметно позже браузера.
-    delay(stopwatch.running() ? 5 : 100);
+    delay(stopwatch.running() ? LOOP_STOPWATCH_MS : LOOP_IDLE_MS);
 }
