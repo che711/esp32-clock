@@ -12,7 +12,7 @@
 #include "sensor.h"
 #include "battery.h"
 #include "mqtt.h"
-#include "web_ui.h"
+#include "web_ui_gz.h"   // генерируется из web/index.html при сборке
 
 // Совместимость имён: config.h ↔ прежний код часов
 #define WIFI_PASS  WIFI_PASSWORD
@@ -192,7 +192,10 @@ void broadcastState() {
 // ─── HTTP ─────────────────────────────────────────────────
 void handleRoot() {
     requestCount++;
-    server.send_P(200, "text/html", INDEX_HTML);
+    // Страница лежит во флеше уже сжатой — распаковывает её браузер.
+    // 75 КБ → 17 КБ и по сети, и во флеше.
+    server.sendHeader("Content-Encoding", "gzip");
+    server.send_P(200, "text/html", (PGM_P)INDEX_HTML_GZ, INDEX_HTML_GZ_LEN);
 }
 
 void handleApiStats() {
@@ -473,9 +476,11 @@ static void drawBottomStatus(const char* mark, bool withDate, bool withTemp) {
         int pctW   = u8g2.getStrWidth(pctStr);
         int iconW  = 16;                         // 14 тело + 2 носик
         int totalW = iconW + 3 + pctW;
-        int x      = 256 - totalW - 2;
-        drawBattIcon(x, 56, battery.percent);    // верх 56 → низ 62, вровень с текстом
-        u8g2.drawStr(x + iconW + 3, 63, pctStr);
+        // Своё имя, а не x: батарея прижата к правому краю независимо
+        // от курсора сегментов выше, и путать их не стоит.
+        int xBat   = 256 - totalW - 2;
+        drawBattIcon(xBat, 56, battery.percent);  // верх 56 → низ 62, вровень с текстом
+        u8g2.drawStr(xBat + iconW + 3, 63, pctStr);
     }
 }
 #endif
@@ -504,10 +509,12 @@ void drawOLED() {
         // ── Режим секундомера ──────────────────────────
         char full[16];
         formatStopwatch(swElapsed(), full, sizeof(full));  // "MM:SS.mmm"
-        // делим на "MM:SS" (крупно) и ".mmm" (мельче)
-        char mmss[6];  char msStr[5];
+        // делим на "MM:SS" (крупно) и хвост (мельче): ".mmm" у секундомера
+        // до часа, ":SS" после. Точность у %s — чтобы гарантия влезания была
+        // видна компилятору, а не держалась на длине формата в formatStopwatch.
+        char mmss[6];  char msStr[8];
         memcpy(mmss, full, 5);   mmss[5] = '\0';
-        snprintf(msStr, sizeof(msStr), "%s", full + 5);    // ".mmm" -> ровно 5 байт
+        snprintf(msStr, sizeof(msStr), "%.*s", (int)sizeof(msStr) - 1, full + 5);
 
         u8g2.setFont(u8g2_font_logisoso46_tr);
         int mainW = u8g2.getStrWidth(mmss);
@@ -687,7 +694,7 @@ void setup() {
     // 80 МГц вместо 160: для часов + веб-сервера хватает с запасом,
     // а нагрев кристалла и потребление заметно ниже. 80 — минимум для WiFi.
     setCpuFrequencyMhz(80);
-    Serial.printf("CPU @ %u MHz\n", getCpuFrequencyMhz());
+    Serial.printf("CPU @ %u MHz\n", (unsigned)getCpuFrequencyMhz());
 
     // Датчик BMP280 и батарея
     if (!sensorInit()) {

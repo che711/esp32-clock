@@ -15,10 +15,14 @@ inline void formatUptime(uint32_t totalSeconds, char* buf, size_t sz) {
     uint32_t d = s / 86400; s %= 86400;
     uint32_t h = s / 3600;  s %= 3600;
     uint32_t m = s / 60;    s %= 60;
+    // Приведение к unsigned обязательно: на 32-битной цели uint32_t —
+    // это unsigned long, и %u без каста ловит -Wformat.
     if (d > 0)
-        snprintf(buf, sz, "%ud %02uh %02um %02us", d, h, m, s);
+        snprintf(buf, sz, "%ud %02uh %02um %02us",
+                 (unsigned)d, (unsigned)h, (unsigned)m, (unsigned)s);
     else
-        snprintf(buf, sz, "%02uh %02um %02us", h, m, s);
+        snprintf(buf, sz, "%02uh %02um %02us",
+                 (unsigned)h, (unsigned)m, (unsigned)s);
 }
 
 // ─── Яркость по часу ─────────────────────────────────────
