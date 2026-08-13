@@ -119,10 +119,25 @@ static void connectWifi() {
     }
 }
 
-static void syncNTP() {
-    if (WiFi.status() != WL_CONNECTED) return;
-    // configTzTime сразу задаёт TZ-правило (DST считается автоматически).
+// Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
+// чтобы ретрай отсчитывался от старта, а не от первого захода в цикл.
+static uint32_t lastNtpMs = 0;
+
+// Поднимает SNTP-демона и задаёт TZ-правило (DST считается автоматически).
+// Вызывается и без связи: TZ должен быть установлен в любом случае, а демон
+// сам ретраит запрос, когда сеть появится.
+static void startNTP() {
     configTzTime(TZ_INFO, NTP_SERVER);
+    lastNtpMs = millis();
+}
+
+static void syncNTP() {
+    startNTP();
+    // Без связи ждать нечего — уйдём в loop(), ретрай сделает maintainNetwork().
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("NTP: no WiFi, retry in background");
+        return;
+    }
     Serial.print("NTP sync");
     struct tm t;
     uint8_t tries = 0;
@@ -130,14 +145,14 @@ static void syncNTP() {
     while (!getLocalTime(&t, 500) && tries < 20) {
         Serial.print("."); tries++;
     }
-    timeSynced = (tries < 20);
-    Serial.println(timeSynced ? " OK" : " TIMEOUT");
+    // Ждём только ради первого кадра: не дождались — не беда, экран покажет
+    // прочерки, а демон и ретрай в maintainNetwork() доведут дело до конца.
+    Serial.println(tries < 20 ? " OK" : " TIMEOUT, retry in background");
 }
 
 // Поддержание сети: реконнект + периодический ре-синк NTP
 static void maintainNetwork() {
     static uint32_t lastCheck = 0;
-    static uint32_t lastNtp   = 0;
     uint32_t now = millis();
 
     if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
@@ -146,28 +161,16 @@ static void maintainNetwork() {
             Serial.println("WiFi lost -> reconnect");
             WiFi.reconnect();
         }
-        // Адрес перечитываем в любом случае, а не только при живой связи:
-        // он мог смениться после реконнекта, а при обрыве стек сам обнуляет
-        // его в 0.0.0.0 — и на экране не зависает адрес, по которому уже
-        // не достучаться.
         String ip = WiFi.localIP().toString();
         if (ip != localIP) localIP = ip;
     }
-    if (timeSynced && now - lastNtp >= 6UL * 3600UL * 1000UL) {  // ре-синк раз в 6 ч
-        lastNtp = now;
-        configTzTime(TZ_INFO, NTP_SERVER);
-        Serial.println("NTP resync");
+    uint32_t ntpEvery = timeSynced ? NTP_RESYNC_MS : NTP_RETRY_MS;
+    if (WiFi.status() == WL_CONNECTED && now - lastNtpMs >= ntpEvery) {
+        Serial.println(timeSynced ? "NTP resync" : "NTP retry");
+        startNTP();
     }
 }
 
-// ─── Буферы времени ───────────────────────────────────────
-// Возвращает true, когда строки изменились — то есть ровно раз в секунду.
-//
-// Дешёвая проверка time() спереди стоит того: во время отсчёта секундомера
-// loop() крутится 200 раз в секунду, и без неё каждый оборот тратился бы на
-// четыре snprintf и localtime_r внутри getLocalTime. Пока время не
-// синхронизировано, getLocalTime к тому же добирает свои delay(10)
-// на каждом вызове — теперь это раз в секунду, а не 200.
 static bool updateTimeStrings() {
     static time_t lastEpoch = 0;
     static bool   rendered  = false;
@@ -178,7 +181,16 @@ static bool updateTimeStrings() {
     rendered  = true;
 
     struct tm t;
-    if (getLocalTime(&t, 0)) {
+    // timeSynced — живой признак «часы идут», а не «синк на старте прошёл»:
+    // иначе после неудачного старта флаг оставался бы ложным даже с верным
+    // временем, а после потери часов — истинным с прочерками на экране.
+    bool ok = getLocalTime(&t, 0);
+    if (ok != timeSynced) {
+        timeSynced = ok;
+        Serial.println(ok ? "Clock: time acquired" : "Clock: time LOST");
+    }
+
+    if (ok) {
         snprintf(timeBuf,     sizeof(timeBuf),
                  "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
         snprintf(dateBuf,     sizeof(dateBuf),
