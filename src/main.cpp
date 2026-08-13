@@ -145,10 +145,13 @@ static void maintainNetwork() {
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("WiFi lost -> reconnect");
             WiFi.reconnect();
-        } else {
-            String ip = WiFi.localIP().toString();
-            if (ip != localIP) localIP = ip;  // IP мог смениться при реконнекте
         }
+        // Адрес перечитываем в любом случае, а не только при живой связи:
+        // он мог смениться после реконнекта, а при обрыве стек сам обнуляет
+        // его в 0.0.0.0 — и на экране не зависает адрес, по которому уже
+        // не достучаться.
+        String ip = WiFi.localIP().toString();
+        if (ip != localIP) localIP = ip;
     }
     if (timeSynced && now - lastNtp >= 6UL * 3600UL * 1000UL) {  // ре-синк раз в 6 ч
         lastNtp = now;
