@@ -110,11 +110,15 @@ static int drawBattIcon(int x, int yTop, uint8_t pct) {
 
 // Нижняя строка: сегменты через точку слева, батарея справа.
 // mark — маркер перед сегментами ("II " на паузе) или nullptr.
+//
+// Сегменты упорядочены по убыванию важности: если строка не помещается
+// до батареи, хвост просто не рисуется. Раньше ширина не проверялась вовсе
+// и всё держалось на том, что сегментов заведомо мало.
 static void drawBottomStatus(const char* mark, bool withDate, bool withTemp) {
     u8g2.setFont(u8g2_font_5x7_tr);
 
     char tstr[12], pstr[12];
-    const char* segs[4];
+    const char* segs[5];
     int n = 0;
 
     if (withDate && timeSynced) {
@@ -131,22 +135,15 @@ static void drawBottomStatus(const char* mark, bool withDate, bool withTemp) {
         snprintf(pstr, sizeof(pstr), "%.0fhPa", weather.pressure);
         segs[n++] = pstr;
     }
+    // Адрес — последним: нужен редко (когда роутер выдал новый и clock.local
+    // не отзывается), поэтому при нехватке места жертвуем именно им.
+    // На секундомере не показываем: там режим сосредоточенный.
+    // 0.0.0.0 — сети нет, показывать нечего.
+    if (withDate && localIP.length() && localIP != "0.0.0.0") segs[n++] = localIP.c_str();
 
-    int x = 2;
-    if (mark && mark[0]) {
-        u8g2.drawStr(x, 63, mark);
-        x += u8g2.getStrWidth(mark);
-    }
-    for (int i = 0; i < n; i++) {
-        if (i) {
-            u8g2.drawBox(x + 3, 59, 2, 2);   // разделитель-точка по центру строки
-            x += 8;
-        }
-        u8g2.drawStr(x, 63, segs[i]);
-        x += u8g2.getStrWidth(segs[i]);
-    }
-
-    // Батарея — только если обнаружена (иначе питание от USB)
+    // Батарею считаем первой, чтобы знать, где заканчивается место под текст.
+    // Показывается, только если обнаружена (иначе питание от USB).
+    int textLimit = 254;
     if (battery.valid) {
         char pctStr[6];
         snprintf(pctStr, sizeof(pctStr), "%u%%", battery.percent);
@@ -158,6 +155,23 @@ static void drawBottomStatus(const char* mark, bool withDate, bool withTemp) {
         int xBat   = 256 - totalW - 2;
         drawBattIcon(xBat, 56, battery.percent);  // верх 56 → низ 62, вровень с текстом
         u8g2.drawStr(xBat + iconW + 3, 63, pctStr);
+        textLimit = xBat - 4;                     // воздух между текстом и иконкой
+    }
+
+    int x = 2;
+    if (mark && mark[0]) {
+        u8g2.drawStr(x, 63, mark);
+        x += u8g2.getStrWidth(mark);
+    }
+    for (int i = 0; i < n; i++) {
+        int gap = i ? 8 : 0;
+        if (x + gap + u8g2.getStrWidth(segs[i]) > textLimit) break;
+        if (gap) {
+            u8g2.drawBox(x + 3, 59, 2, 2);   // разделитель-точка по центру строки
+            x += gap;
+        }
+        u8g2.drawStr(x, 63, segs[i]);
+        x += u8g2.getStrWidth(segs[i]);
     }
 }
 #endif

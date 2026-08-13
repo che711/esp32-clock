@@ -3,6 +3,7 @@
 #include "app.h"
 #include "display.h"
 #include "clock_utils.h"
+#include "origin_check.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
@@ -15,6 +16,37 @@
 static WebServer        server(80);
 static WebSocketsServer webSocket(81);
 static uint32_t         requestCount = 0;
+
+// ─── Защита изменяющих запросов ───────────────────────────
+// Любая открытая в браузере страница может отправить нам POST или открыть
+// WebSocket — локальная сеть тут не граница, потому что код выполняется
+// в браузере, который в этой сети уже находится. Отличить свой дашборд
+// от чужой вкладки позволяет Origin: его ставит браузер, и подделать его
+// со страницы нельзя. Логика сравнения — в origin_check.h.
+//
+// WebServer хранит только заранее заказанные заголовки, иначе
+// server.header("Origin") вернёт пустую строку.
+static const char* COLLECTED_HEADERS[] = { "Origin" };
+
+// Пустой Origin — это не браузер (curl, Home Assistant, скрипты): пропускаем.
+// Защищаемся от чужой вкладки, а не от осознанного запроса из консоли.
+static bool originAccepted() {
+    String origin = server.header("Origin");
+    if (origin.length() == 0) return true;
+    return originIsLocalDevice(origin.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
+}
+
+static void sendForeignOrigin() {
+    server.send(403, "application/json", "{\"error\":\"foreign origin\"}");
+}
+
+// Вызывается на каждый заголовок рукопожатия WebSocket. Origin не помечен
+// обязательным, поэтому клиент без него (не браузер) подключится, а вот
+// чужой Origin рукопожатие завалит.
+static bool wsValidateHeader(String headerName, String headerValue) {
+    if (!headerName.equalsIgnoreCase("Origin")) return true;
+    return originIsLocalDevice(headerValue.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
+}
 
 // ─── JSON ─────────────────────────────────────────────────
 static void buildJson(char* buf, size_t sz) {
@@ -136,6 +168,7 @@ static void handleApiWeather() {
 
 static void handleApiBrightness() {
     requestCount++;
+    if (!originAccepted()) return sendForeignOrigin();
     if (server.hasArg("auto")) {
         displaySetAuto();
         server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
@@ -158,6 +191,7 @@ static void handleApiBrightness() {
 
 static void handleApiPower() {
     requestCount++;
+    if (!originAccepted()) return sendForeignOrigin();
     if (server.hasArg("on")) {
         bool on = server.arg("on") != "0";
         displaySetPower(on);
@@ -173,6 +207,7 @@ static void handleApiPower() {
 
 static void handleReboot() {
     requestCount++;
+    if (!originAccepted()) return sendForeignOrigin();
     server.send(200, "text/plain", "Rebooting...");
     delay(300);
     ESP.restart();
@@ -216,6 +251,9 @@ static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t 
 
 // ─── Публичный API ────────────────────────────────────────
 void webApiBegin() {
+    server.collectHeaders(COLLECTED_HEADERS,
+                          sizeof(COLLECTED_HEADERS) / sizeof(COLLECTED_HEADERS[0]));
+
     server.on("/",               HTTP_GET,  handleRoot);
     server.on("/api/stats",      HTTP_GET,  handleApiStats);
     server.on("/api/time",       HTTP_GET,  handleApiTime);
@@ -228,6 +266,9 @@ void webApiBegin() {
 
     webSocket.begin();
     webSocket.onEvent(webSocketEvent);
+    // Счётчик обязательных заголовков 0: без Origin (не браузер) пускаем,
+    // с чужим Origin — отказ в рукопожатии.
+    webSocket.onValidateHttpHeader(wsValidateHeader, COLLECTED_HEADERS, 0);
 
     Serial.println("HTTP :80  WS :81");
 }
