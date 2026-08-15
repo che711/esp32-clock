@@ -38,6 +38,21 @@ static const char* DAYS_FULL[]  = { "Sunday","Monday","Tuesday","Wednesday",
 static const char* MONTHS[]     = { "JAN","FEB","MAR","APR","MAY","JUN",
                                     "JUL","AUG","SEP","OCT","NOV","DEC" };
 
+// Локальное время «прямо сейчас», без ожидания.
+// Своя реализация вместо getLocalTime(&t, 0): та отмеряет таймаут как
+// while (millis() - start <= ms) и при ms == 0 возвращает false, ни разу
+// не прочитав часы, если между двумя millis() успел смениться тик, —
+// а вытеснение loop-задачи планировщиком делает это регулярно. Экран
+// в такие моменты на секунду показывал прочерки при исправных часах.
+static bool localTimeNow(struct tm* t, time_t now) {
+    localtime_r(&now, t);
+    return t->tm_year > (2016 - 1900);   // тот же критерий «время задано»
+}
+
+static bool localTimeNow(struct tm* t) {
+    return localTimeNow(t, time(nullptr));
+}
+
 // WS2812 на GPIO8: pinMode НЕ вызывать — сломает RMT адресного LED
 static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
     rgbLedWrite(LED_PIN, r, g, b);
@@ -60,7 +75,7 @@ float dieTempC() {
 void applyAutoBrightness() {
     if (displayIsManual() || !timeSynced) return;
     struct tm t;
-    if (!getLocalTime(&t, 0)) return;
+    if (!localTimeNow(&t)) return;
     displayAutoForHour(t.tm_hour);
 }
 
@@ -184,7 +199,9 @@ static bool updateTimeStrings() {
     // timeSynced — живой признак «часы идут», а не «синк на старте прошёл»:
     // иначе после неудачного старта флаг оставался бы ложным даже с верным
     // временем, а после потери часов — истинным с прочерками на экране.
-    bool ok = getLocalTime(&t, 0);
+    // Раскладываем тот же now, что дал шаг «секунда сменилась», — иначе
+    // кадр мог бы отрисовать соседнюю секунду.
+    bool ok = localTimeNow(&t, now);
     if (ok != timeSynced) {
         timeSynced = ok;
         Serial.println(ok ? "Clock: time acquired" : "Clock: time LOST");
