@@ -40,7 +40,9 @@ void powerApplyRadio() {
         cfg.sta.listen_interval = p.listenInterval;
         esp_wifi_set_config(WIFI_IF_STA, &cfg);
     }
-    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+    // Пока идёт замер секундомера, сон радио выключен ради точности отсчёта
+    // (см. setRadioSaving в main.cpp) — обратно его здесь не включаем.
+    if (stopwatch.idle()) esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
 }
 
 // Применить профиль целиком. Радио трогаем только если оно поднято —
@@ -57,19 +59,21 @@ void powerBegin() {
     applyProfile();
 }
 
+// Решение автоматики на текущий момент. Время суток здесь не участвует:
+// ночью экран гасит расписание эконома, режим от часа не зависит.
+static PowerMode evaluateAuto() {
+    // Пауза секундомера — тоже работа: замер не окончен.
+    return powerAutoMode(mode, !stopwatch.idle(),
+                         battery.percent, battery.valid,
+                         POWER_SURVIVAL_PCT, POWER_HYSTERESIS_PCT);
+}
+
 void powerLoop() {
     if (!autoBy) return;
-
-    // Раз в 5 с: чаще незачем, заряд так быстро не меняется, а лишние
-    // переключения профиля дёргают радио и экран.
-    static uint32_t lastCheck = 0;
-    uint32_t now = millis();
-    if (now - lastCheck < 5000) return;
-    lastCheck = now;
-
-    PowerMode next = powerModeForCharge(mode, battery.percent, battery.valid,
-                                        POWER_ECO_PCT, POWER_SURVIVAL_PCT,
-                                        POWER_HYSTERESIS_PCT);
+    // Без троттлинга: старт секундомера должен поднимать режим сразу, а не
+    // через несколько секунд. Сама проверка — пара сравнений, профиль
+    // применяется только при смене режима.
+    PowerMode next = evaluateAuto();
     if (next == mode) return;
     mode = next;
     applyProfile();
@@ -88,10 +92,7 @@ void powerSetMode(PowerMode m) {
 
 void powerSetAuto() {
     autoBy = true;
-    PowerMode next = powerModeForCharge(mode, battery.percent, battery.valid,
-                                        POWER_ECO_PCT, POWER_SURVIVAL_PCT,
-                                        POWER_HYSTERESIS_PCT);
-    mode = next;
+    mode = evaluateAuto();
     applyProfile();
 }
 
@@ -100,8 +101,11 @@ bool     powerLedEnabled()       { return powerProfile(mode).led; }
 bool     powerWifiWanted()       { return powerProfile(mode).wifi; }
 
 bool powerScreenAllowedNow(int hour) {
+    // Ночное окно осталось только за экраном: сам режим от часа не зависит,
+    // а подсветке разрешено гореть ровно в «не ночь» — границы те же,
+    // вывернутые.
     return powerScreenAllowedAt(mode, hour,
-                                POWER_SCREEN_ON_HOUR, POWER_SCREEN_OFF_HOUR,
+                                POWER_NIGHT_OFF_HOUR, POWER_NIGHT_ON_HOUR,
                                 battery.percent, battery.valid,
                                 POWER_SCREEN_OFF_PCT);
 }

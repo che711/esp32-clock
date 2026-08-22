@@ -2,6 +2,7 @@
 #include <string.h>
 #include <math.h>
 #include "../../src/clock_utils.h"
+#include "../../src/display_calc.h"
 #include "../../src/battery_calc.h"
 #include "../../src/power_calc.h"
 #include "../../src/weather_calc.h"
@@ -338,13 +339,27 @@ void test_battery_monotonic() {
 void test_battery_plausible_usb() {
     TEST_ASSERT_FALSE(batteryVoltagePlausible(0.0f));    // вход висит в воздухе
     TEST_ASSERT_FALSE(batteryVoltagePlausible(2.79f));
-    TEST_ASSERT_FALSE(batteryVoltagePlausible(4.36f));
+    TEST_ASSERT_FALSE(batteryVoltagePlausible(4.61f));
+    TEST_ASSERT_FALSE(batteryVoltagePlausible(5.00f));   // делитель цепляет не банку
 }
 
 void test_battery_plausible_battery() {
     TEST_ASSERT_TRUE(batteryVoltagePlausible(2.80f));
     TEST_ASSERT_TRUE(batteryVoltagePlausible(3.70f));
-    TEST_ASSERT_TRUE(batteryVoltagePlausible(4.35f));
+    TEST_ASSERT_TRUE(batteryVoltagePlausible(4.60f));
+}
+
+// Полная банка на зарядке плюс поправка BATTERY_CAL с середины разряда:
+// 4.20 В превращаются в 4.31–4.33, и это ещё батарея, а не «АКБ снята»
+void test_battery_plausible_full_with_calibration() {
+    TEST_ASSERT_TRUE(batteryVoltagePlausible(4.20f * 1.027f));
+    TEST_ASSERT_TRUE(batteryVoltagePlausible(4.25f * 1.03f));
+}
+
+// Выше кривой уже некуда: 100 % отдаём и на границе правдоподобия
+void test_battery_percent_saturates_above_curve() {
+    TEST_ASSERT_EQUAL_UINT8(100, batteryVoltageToPercent(4.31f));
+    TEST_ASSERT_EQUAL_UINT8(100, batteryVoltageToPercent(4.60f));
 }
 
 // ─── Батарея: фильтр замеров ─────────────────────────────
@@ -401,51 +416,96 @@ void test_battery_jump_ignores_noise() {
     TEST_ASSERT_FALSE(batteryJumped(3.900f, 3.900f, 0.25f));
 }
 
-// ─── Энергосбережение: выбор режима ──────────────────────
-static PowerMode modeFor(PowerMode cur, uint8_t pct, bool valid = true) {
-    return powerModeForCharge(cur, pct, valid, 30, 10, 5);
+// ─── Яркость: уровень шкалы → регистры тока SSD1322 ──────
+// Максимум шкалы — максимум обоих регистров
+void test_drive_full_scale() {
+    PanelDrive d = panelDriveForLevel(255);
+    TEST_ASSERT_EQUAL_UINT8(15,  d.master);
+    TEST_ASSERT_EQUAL_UINT8(255, d.contrast);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, panelDriveFraction(d));
 }
 
-void test_power_full_charge_normal() {
-    TEST_ASSERT_EQUAL(POWER_NORMAL, modeFor(POWER_NORMAL, 90));
+// Нижняя ступень — 1/4096 полного тока, а не 1/256: ради этого и заведён
+// master-регистр, иначе между «выключено» и минимумом зияет провал
+void test_drive_bottom_step_is_far_below_contrast_floor() {
+    PanelDrive d = panelDriveForLevel(1);
+    TEST_ASSERT_EQUAL_UINT8(0, d.master);
+    TEST_ASSERT_TRUE(panelDriveFraction(d) < 1.0f / 256.0f);
 }
 
-void test_power_drops_to_eco() {
-    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_NORMAL, 30));
-    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_NORMAL, 15));
-}
-
-void test_power_drops_to_survival() {
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_ECO, 10));
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_ECO, 3));
-}
-
-// Вверх — только с запасом: на самом пороге режим не отпускаем
-void test_power_hysteresis_holds_eco() {
-    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_ECO, 31));
-    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_ECO, 34));
-    TEST_ASSERT_EQUAL(POWER_NORMAL, modeFor(POWER_ECO, 35));
-}
-
-void test_power_hysteresis_holds_survival() {
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_SURVIVAL, 11));
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_SURVIVAL, 14));
-    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_SURVIVAL, 15));
-}
-
-// Заряд гуляет вокруг порога — режим не должен дребезжать
-void test_power_no_flapping_at_threshold() {
-    PowerMode m = POWER_NORMAL;
-    const uint8_t walk[] = { 31, 29, 31, 30, 32, 29, 33 };
-    for (unsigned i = 0; i < sizeof(walk) / sizeof(walk[0]); i++) {
-        PowerMode next = modeFor(m, walk[i]);
-        if (i > 0) TEST_ASSERT_EQUAL(POWER_ECO, next);   // после первого входа держится
-        m = next;
+// Шкала монотонна: ползунок вверх не должен нигде притушивать экран
+void test_drive_is_monotonic() {
+    float prev = -1.0f;
+    for (int lv = 0; lv <= 255; lv++) {
+        float f = panelDriveFraction(panelDriveForLevel((uint8_t)lv));
+        TEST_ASSERT_TRUE(f >= prev);
+        prev = f;
     }
 }
 
-void test_power_usb_forces_normal() {
-    TEST_ASSERT_EQUAL(POWER_NORMAL, modeFor(POWER_SURVIVAL, 5, false));
+// Середина шкалы — заметно меньше половины тока: восприятие нелинейно,
+// линейная шкала оставляла бы почти всю разницу на нижних процентах
+void test_drive_midpoint_is_gamma_corrected() {
+    float f = panelDriveFraction(panelDriveForLevel(128));
+    TEST_ASSERT_TRUE(f > 0.15f);
+    TEST_ASSERT_TRUE(f < 0.30f);
+}
+
+// Регистры не выходят за диапазон, который принимает панель
+void test_drive_registers_in_range() {
+    for (int lv = 0; lv <= 255; lv++) {
+        PanelDrive d = panelDriveForLevel((uint8_t)lv);
+        TEST_ASSERT_TRUE(d.master <= 15);
+        TEST_ASSERT_TRUE(panelDriveFraction(d) > 0.0f);
+    }
+}
+
+// ─── Энергосбережение: автоматический выбор режима ───────
+// Порядок аргументов длинный, поэтому обёртка: заряд 80 %, банка есть,
+// порог выживания 10 %, гистерезис 5 %.
+static PowerMode autoMode(PowerMode cur, bool sw,
+                          uint8_t pct = 80, bool valid = true) {
+    return powerAutoMode(cur, sw, pct, valid, 10, 5);
+}
+
+// Без секундомера и при живом заряде базовый режим — эконом, а не обычный
+void test_auto_idle_is_eco() {
+    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_ECO, false));
+    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_SURVIVAL, false));
+}
+
+void test_auto_stopwatch_raises_to_normal() {
+    TEST_ASSERT_EQUAL(POWER_NORMAL, autoMode(POWER_ECO, true));
+}
+
+// Секундомер главнее низкого заряда — иначе замер оборвался бы на середине
+void test_auto_stopwatch_beats_low_charge() {
+    TEST_ASSERT_EQUAL(POWER_NORMAL, autoMode(POWER_SURVIVAL, true, 4));
+}
+
+// Заряд на исходе — выживание в любое время суток
+void test_auto_low_charge_is_survival() {
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_ECO, false, 10));
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_ECO, false, 3));
+}
+
+void test_auto_charge_hysteresis() {
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_SURVIVAL, false, 12));
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_SURVIVAL, false, 14));
+    TEST_ASSERT_EQUAL(POWER_ECO,      autoMode(POWER_SURVIVAL, false, 15));
+}
+
+// На USB заряда не знаем — правило по заряду не применяем, остаёмся в экономе
+void test_auto_usb_ignores_charge_rule() {
+    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_ECO, false, 0, false));
+    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_SURVIVAL, false, 0, false));
+}
+
+// Ночь на режим не влияет: экран гасит расписание, Wi-Fi остаётся поднятым,
+// иначе ночью не запустить секундомер и не открыть дашборд
+void test_auto_night_stays_eco() {
+    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_ECO, false));
+    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_SURVIVAL, false));
 }
 
 // ─── Энергосбережение: профили и расписание ──────────────
@@ -808,6 +868,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_monotonic);
     RUN_TEST(test_battery_plausible_usb);
     RUN_TEST(test_battery_plausible_battery);
+    RUN_TEST(test_battery_plausible_full_with_calibration);
+    RUN_TEST(test_battery_percent_saturates_above_curve);
 
     RUN_TEST(test_battery_median_odd);
     RUN_TEST(test_battery_median_even);
@@ -820,13 +882,19 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_jump_detects_usb_unplug);
     RUN_TEST(test_battery_jump_ignores_noise);
 
-    RUN_TEST(test_power_full_charge_normal);
-    RUN_TEST(test_power_drops_to_eco);
-    RUN_TEST(test_power_drops_to_survival);
-    RUN_TEST(test_power_hysteresis_holds_eco);
-    RUN_TEST(test_power_hysteresis_holds_survival);
-    RUN_TEST(test_power_no_flapping_at_threshold);
-    RUN_TEST(test_power_usb_forces_normal);
+    RUN_TEST(test_drive_full_scale);
+    RUN_TEST(test_drive_bottom_step_is_far_below_contrast_floor);
+    RUN_TEST(test_drive_is_monotonic);
+    RUN_TEST(test_drive_midpoint_is_gamma_corrected);
+    RUN_TEST(test_drive_registers_in_range);
+
+    RUN_TEST(test_auto_idle_is_eco);
+    RUN_TEST(test_auto_stopwatch_raises_to_normal);
+    RUN_TEST(test_auto_stopwatch_beats_low_charge);
+    RUN_TEST(test_auto_low_charge_is_survival);
+    RUN_TEST(test_auto_charge_hysteresis);
+    RUN_TEST(test_auto_usb_ignores_charge_rule);
+    RUN_TEST(test_auto_night_stays_eco);
     RUN_TEST(test_power_profile_names);
     RUN_TEST(test_power_profile_tightens_with_level);
     RUN_TEST(test_power_profile_bad_index_is_normal);
