@@ -12,5 +12,6 @@ struct BatteryData {
     bool    valid;     // false — АКБ не обнаружена (питание от USB)
 };
 
-void        batteryInit();   // вызвать в setup()
-BatteryData batteryRead();
+void        batteryInit();   // вызвать в setup(): настроит АЦП и снимет первый замер
+void        batteryLoop();   // вызывать из loop(): по отсчёту за раз, без задержек
+BatteryData batteryRead();   // последний посчитанный результат

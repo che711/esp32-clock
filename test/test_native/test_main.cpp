@@ -3,6 +3,7 @@
 #include <math.h>
 #include "../../src/clock_utils.h"
 #include "../../src/battery_calc.h"
+#include "../../src/power_calc.h"
 #include "../../src/weather_calc.h"
 #include "../../src/stopwatch.h"
 #include "../../src/origin_check.h"
@@ -309,9 +310,18 @@ void test_battery_curve_point() {
     TEST_ASSERT_EQUAL_UINT8(50, batteryVoltageToPercent(3.82f));
 }
 
+// Хвост поджат под реальную отсечку устройства: ниже ~3.6 В диод и LDO
+// уже не держат 3.3 В, поэтому «настоящих» процентов там показывать нечего
+void test_battery_curve_tail_matches_cutoff() {
+    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.70f));
+    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.72f));
+    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.55f));
+    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.45f));
+}
+
 // Середина отрезка 3.68В(10%)…3.74В(20%) — проверяем интерполяцию
 void test_battery_interpolation() {
-    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));
+    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.73f));
 }
 
 // Кривая обязана быть монотонной: выше напряжение — не меньше процент
@@ -335,6 +345,192 @@ void test_battery_plausible_battery() {
     TEST_ASSERT_TRUE(batteryVoltagePlausible(2.80f));
     TEST_ASSERT_TRUE(batteryVoltagePlausible(3.70f));
     TEST_ASSERT_TRUE(batteryVoltagePlausible(4.35f));
+}
+
+// ─── Батарея: фильтр замеров ─────────────────────────────
+void test_battery_median_odd() {
+    uint32_t v[5] = { 1950, 1948, 1600, 1952, 1949 };   // 1600 — провал от Wi-Fi
+    TEST_ASSERT_EQUAL_UINT32(1949, batteryMedianMv(v, 5));
+}
+
+void test_battery_median_even() {
+    uint32_t v[4] = { 1950, 1946, 1948, 1952 };         // среднее двух средних
+    TEST_ASSERT_EQUAL_UINT32(1949, batteryMedianMv(v, 4));
+}
+
+void test_battery_median_sorts_in_place() {
+    uint32_t v[4] = { 30, 10, 40, 20 };
+    batteryMedianMv(v, 4);
+    TEST_ASSERT_EQUAL_UINT32(10, v[0]);
+    TEST_ASSERT_EQUAL_UINT32(40, v[3]);
+}
+
+void test_battery_median_empty() {
+    TEST_ASSERT_EQUAL_UINT32(0, batteryMedianMv(nullptr, 0));
+}
+
+// Пачка провалов не сдвигает медиану, пока их меньше половины набора
+void test_battery_median_ignores_minority_dips() {
+    uint32_t v[9] = { 1950, 1950, 1951, 1600, 1580, 1620, 1949, 1950, 1951 };
+    TEST_ASSERT_EQUAL_UINT32(1950, batteryMedianMv(v, 9));
+}
+
+void test_battery_smooth_pulls_toward_fresh() {
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 3.910f, batterySmooth(3.900f, 4.000f, 0.10f));
+}
+
+void test_battery_smooth_zero_alpha_holds() {
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 3.900f, batterySmooth(3.900f, 4.000f, 0.0f));
+}
+
+// Единичный выброс за 16 наборов сдвигает результат меньше чем на 10 мВ
+void test_battery_smooth_suppresses_single_spike() {
+    float v = 3.900f;
+    v = batterySmooth(v, 3.700f, 0.10f);
+    for (int i = 0; i < 15; i++) v = batterySmooth(v, 3.900f, 0.10f);
+    TEST_ASSERT_FLOAT_WITHIN(0.010f, 3.900f, v);
+}
+
+void test_battery_jump_detects_usb_unplug() {
+    TEST_ASSERT_TRUE(batteryJumped(4.010f, 3.700f, 0.25f));
+    TEST_ASSERT_TRUE(batteryJumped(3.700f, 4.010f, 0.25f));   // и в обратную сторону
+}
+
+void test_battery_jump_ignores_noise() {
+    TEST_ASSERT_FALSE(batteryJumped(3.900f, 3.870f, 0.25f));
+    TEST_ASSERT_FALSE(batteryJumped(3.900f, 3.900f, 0.25f));
+}
+
+// ─── Энергосбережение: выбор режима ──────────────────────
+static PowerMode modeFor(PowerMode cur, uint8_t pct, bool valid = true) {
+    return powerModeForCharge(cur, pct, valid, 30, 10, 5);
+}
+
+void test_power_full_charge_normal() {
+    TEST_ASSERT_EQUAL(POWER_NORMAL, modeFor(POWER_NORMAL, 90));
+}
+
+void test_power_drops_to_eco() {
+    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_NORMAL, 30));
+    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_NORMAL, 15));
+}
+
+void test_power_drops_to_survival() {
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_ECO, 10));
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_ECO, 3));
+}
+
+// Вверх — только с запасом: на самом пороге режим не отпускаем
+void test_power_hysteresis_holds_eco() {
+    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_ECO, 31));
+    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_ECO, 34));
+    TEST_ASSERT_EQUAL(POWER_NORMAL, modeFor(POWER_ECO, 35));
+}
+
+void test_power_hysteresis_holds_survival() {
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_SURVIVAL, 11));
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, modeFor(POWER_SURVIVAL, 14));
+    TEST_ASSERT_EQUAL(POWER_ECO, modeFor(POWER_SURVIVAL, 15));
+}
+
+// Заряд гуляет вокруг порога — режим не должен дребезжать
+void test_power_no_flapping_at_threshold() {
+    PowerMode m = POWER_NORMAL;
+    const uint8_t walk[] = { 31, 29, 31, 30, 32, 29, 33 };
+    for (unsigned i = 0; i < sizeof(walk) / sizeof(walk[0]); i++) {
+        PowerMode next = modeFor(m, walk[i]);
+        if (i > 0) TEST_ASSERT_EQUAL(POWER_ECO, next);   // после первого входа держится
+        m = next;
+    }
+}
+
+void test_power_usb_forces_normal() {
+    TEST_ASSERT_EQUAL(POWER_NORMAL, modeFor(POWER_SURVIVAL, 5, false));
+}
+
+// ─── Энергосбережение: профили и расписание ──────────────
+void test_power_profile_names() {
+    TEST_ASSERT_EQUAL_STRING("normal",   powerProfile(POWER_NORMAL).name);
+    TEST_ASSERT_EQUAL_STRING("eco",      powerProfile(POWER_ECO).name);
+    TEST_ASSERT_EQUAL_STRING("survival", powerProfile(POWER_SURVIVAL).name);
+}
+
+void test_power_profile_tightens_with_level() {
+    TEST_ASSERT_TRUE(powerProfile(POWER_ECO).sensorMs > powerProfile(POWER_NORMAL).sensorMs);
+    TEST_ASSERT_TRUE(powerProfile(POWER_SURVIVAL).sensorMs > powerProfile(POWER_ECO).sensorMs);
+    TEST_ASSERT_TRUE(powerProfile(POWER_ECO).contrastPct < powerProfile(POWER_NORMAL).contrastPct);
+    TEST_ASSERT_TRUE(powerProfile(POWER_NORMAL).wifi);
+    TEST_ASSERT_FALSE(powerProfile(POWER_SURVIVAL).wifi);
+}
+
+void test_power_profile_bad_index_is_normal() {
+    TEST_ASSERT_EQUAL_STRING("normal", powerProfile((PowerMode)99).name);
+}
+
+void test_window_plain() {
+    TEST_ASSERT_TRUE(hourInWindow(7, 7, 23));
+    TEST_ASSERT_TRUE(hourInWindow(22, 7, 23));
+    TEST_ASSERT_FALSE(hourInWindow(23, 7, 23));   // верхняя граница не входит
+    TEST_ASSERT_FALSE(hourInWindow(6, 7, 23));
+}
+
+void test_window_over_midnight() {
+    TEST_ASSERT_TRUE(hourInWindow(23, 22, 6));
+    TEST_ASSERT_TRUE(hourInWindow(2, 22, 6));
+    TEST_ASSERT_FALSE(hourInWindow(12, 22, 6));
+}
+
+void test_window_whole_day() {
+    TEST_ASSERT_TRUE(hourInWindow(0, 7, 7));
+    TEST_ASSERT_TRUE(hourInWindow(13, 7, 7));
+}
+
+// В обычном режиме расписание не действует — экран горит круглые сутки
+void test_power_screen_normal_always_on() {
+    TEST_ASSERT_TRUE(powerScreenAllowed(POWER_NORMAL, 3, 7, 23));
+}
+
+void test_power_screen_eco_follows_window() {
+    TEST_ASSERT_FALSE(powerScreenAllowed(POWER_ECO, 3, 7, 23));
+    TEST_ASSERT_TRUE(powerScreenAllowed(POWER_ECO, 12, 7, 23));
+}
+
+// Экран гасится по заряду независимо от режима и часа
+void test_power_screen_off_on_critical_charge() {
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 5, true, 5));
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 2, true, 5));
+}
+
+void test_power_screen_on_above_critical() {
+    TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 6, true, 5));
+}
+
+// На USB заряда не знаем — порог не применяем
+void test_power_screen_ignores_critical_without_battery() {
+    TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 0, false, 5));
+}
+
+// Расписание эконома при живом заряде продолжает действовать
+void test_power_screen_critical_and_schedule_combine() {
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 3, 7, 23, 80, true, 5));
+    TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 80, true, 5));
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 4, true, 5));
+}
+
+void test_power_mode_from_name() {
+    PowerMode m = POWER_NORMAL;
+    TEST_ASSERT_TRUE(powerModeFromName("survival", &m));
+    TEST_ASSERT_EQUAL(POWER_SURVIVAL, m);
+    TEST_ASSERT_TRUE(powerModeFromName("eco", &m));
+    TEST_ASSERT_EQUAL(POWER_ECO, m);
+}
+
+void test_power_mode_from_name_rejects_garbage() {
+    PowerMode m = POWER_ECO;
+    TEST_ASSERT_FALSE(powerModeFromName("turbo", &m));
+    TEST_ASSERT_FALSE(powerModeFromName("", &m));
+    TEST_ASSERT_FALSE(powerModeFromName(nullptr, &m));
+    TEST_ASSERT_EQUAL(POWER_ECO, m);              // при отказе не трогаем
 }
 
 // ─── Метео: производные ───────────────────────────────────
@@ -607,10 +803,44 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_empty);
     RUN_TEST(test_battery_below_empty);
     RUN_TEST(test_battery_curve_point);
+    RUN_TEST(test_battery_curve_tail_matches_cutoff);
     RUN_TEST(test_battery_interpolation);
     RUN_TEST(test_battery_monotonic);
     RUN_TEST(test_battery_plausible_usb);
     RUN_TEST(test_battery_plausible_battery);
+
+    RUN_TEST(test_battery_median_odd);
+    RUN_TEST(test_battery_median_even);
+    RUN_TEST(test_battery_median_sorts_in_place);
+    RUN_TEST(test_battery_median_empty);
+    RUN_TEST(test_battery_median_ignores_minority_dips);
+    RUN_TEST(test_battery_smooth_pulls_toward_fresh);
+    RUN_TEST(test_battery_smooth_zero_alpha_holds);
+    RUN_TEST(test_battery_smooth_suppresses_single_spike);
+    RUN_TEST(test_battery_jump_detects_usb_unplug);
+    RUN_TEST(test_battery_jump_ignores_noise);
+
+    RUN_TEST(test_power_full_charge_normal);
+    RUN_TEST(test_power_drops_to_eco);
+    RUN_TEST(test_power_drops_to_survival);
+    RUN_TEST(test_power_hysteresis_holds_eco);
+    RUN_TEST(test_power_hysteresis_holds_survival);
+    RUN_TEST(test_power_no_flapping_at_threshold);
+    RUN_TEST(test_power_usb_forces_normal);
+    RUN_TEST(test_power_profile_names);
+    RUN_TEST(test_power_profile_tightens_with_level);
+    RUN_TEST(test_power_profile_bad_index_is_normal);
+    RUN_TEST(test_window_plain);
+    RUN_TEST(test_window_over_midnight);
+    RUN_TEST(test_window_whole_day);
+    RUN_TEST(test_power_screen_normal_always_on);
+    RUN_TEST(test_power_screen_eco_follows_window);
+    RUN_TEST(test_power_screen_off_on_critical_charge);
+    RUN_TEST(test_power_screen_on_above_critical);
+    RUN_TEST(test_power_screen_ignores_critical_without_battery);
+    RUN_TEST(test_power_screen_critical_and_schedule_combine);
+    RUN_TEST(test_power_mode_from_name);
+    RUN_TEST(test_power_mode_from_name_rejects_garbage);
 
     RUN_TEST(test_pressure_mmhg);
     RUN_TEST(test_qnh_at_sea_level);

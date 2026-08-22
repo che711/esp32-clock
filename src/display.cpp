@@ -81,11 +81,24 @@ void displaySetAuto() { manualBrightness = false; }
 
 bool displayIsManual() { return manualBrightness; }
 
+// Масштаб авто-яркости: эконом-режимы прижимают всю шкалу разом, а не
+// правят таблицу часов — деление на «утро/день/вечер/ночь» остаётся.
+static uint8_t autoScalePct = 100;
+
+void displaySetAutoScale(uint8_t pct) {
+    if (pct > 100) pct = 100;
+    autoScalePct = pct;
+}
+
 void displayAutoForHour(int hour) {
     if (manualBrightness) return;
     BrightnessLevel b = brightnessForHour(hour);
-    if (b.contrast != currentContrast) {
-        applyContrast(b.contrast, b.label);
+    // Ниже единицы не опускаемся: 0 у SSD1322 — это не «еле-еле», а погасшая
+    // панель, и экран пропал бы вместо того, чтобы просто потускнеть.
+    uint8_t scaled = (uint8_t)((uint32_t)b.contrast * autoScalePct / 100);
+    if (scaled == 0) scaled = 1;
+    if (scaled != currentContrast) {
+        applyContrast(scaled, b.label);
         Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentContrast);
     }
 }
@@ -106,6 +119,25 @@ static int drawBattIcon(int x, int yTop, uint8_t pct) {
     int fillW = (int)pct * (w - 2) / 100;       // заливка пропорционально
     if (fillW > 0) u8g2.drawBox(x + 1, yTop + 1, fillW, h - 2);
     return w + 2;                               // тело + носик
+}
+
+// Крупная перечёркнутая батарея на месте температуры. Когда заряда почти
+// не осталось, это важнее погоды: цифру в углу можно и не заметить, а знак
+// во всё левое поле — нет.
+//
+// Рамка и перечёркивание в две линии: одиночная на 256×64 при низком
+// контрасте теряется, особенно под наклоном.
+static void drawBattWarn(int xLeft, int avail) {
+    const int w = 44, h = 24, nub = 3;
+    int x = xLeft + (avail - (w + nub)) / 2;
+    int y = TEMP_BASELINE - h;
+
+    u8g2.drawFrame(x, y, w, h);
+    u8g2.drawFrame(x + 1, y + 1, w - 2, h - 2);
+    u8g2.drawBox(x + w, y + h / 2 - 4, nub, 8);          // носик
+
+    u8g2.drawLine(x + 4, y + h - 4, x + w - 5, y + 3);   // перечёркивание
+    u8g2.drawLine(x + 5, y + h - 4, x + w - 4, y + 3);
 }
 
 // Нижняя строка: сегменты через точку слева, батарея справа.
@@ -245,28 +277,35 @@ void displayDraw() {
 
         u8g2.drawVLine(xSep, 4, 46);     // разделитель на всю высоту цифр
 
-        // Знак градуса — кружком: в наборе _tr символа ° нет.
-        char tstr[8];
-        if (weather.valid) snprintf(tstr, sizeof(tstr), "%.1f", weather.temperature);
-        else               snprintf(tstr, sizeof(tstr), "--");
+        int leftW = xSep - SEP_GAP - CLOCK_MARGIN;
 
-        int avail = xSep - SEP_GAP - CLOCK_MARGIN - DEGREE_W;
-        int th = 32;
-        u8g2.setFont(u8g2_font_logisoso32_tr);
-        int tw = u8g2.getStrWidth(tstr);
-        if (tw > avail && weather.valid) {         // "-12.3" шире плюсовой:
-            snprintf(tstr, sizeof(tstr), "%.0f", weather.temperature);
-            tw = u8g2.getStrWidth(tstr);           // сперва жертвуем десятыми
-        }
-        if (tw > avail) {                          // и только потом размером
-            th = 26;
-            u8g2.setFont(u8g2_font_logisoso26_tr);
-            tw = u8g2.getStrWidth(tstr);
-        }
+        if (battery.valid && battery.percent <= BATTERY_CRITICAL_PCT) {
+            // Заряд на исходе — вместо погоды предупреждение
+            drawBattWarn(CLOCK_MARGIN, leftW);
+        } else {
+            // Знак градуса — кружком: в наборе _tr символа ° нет.
+            char tstr[8];
+            if (weather.valid) snprintf(tstr, sizeof(tstr), "%.1f", weather.temperature);
+            else               snprintf(tstr, sizeof(tstr), "--");
 
-        int xT = CLOCK_MARGIN + (avail - tw) / 2;
-        u8g2.drawStr(xT, TEMP_BASELINE, tstr);
-        u8g2.drawCircle(xT + tw + 4, TEMP_BASELINE - th + 4, 3);   // ° у верха цифр
+            int avail = leftW - DEGREE_W;
+            int th = 32;
+            u8g2.setFont(u8g2_font_logisoso32_tr);
+            int tw = u8g2.getStrWidth(tstr);
+            if (tw > avail && weather.valid) {         // "-12.3" шире плюсовой:
+                snprintf(tstr, sizeof(tstr), "%.0f", weather.temperature);
+                tw = u8g2.getStrWidth(tstr);           // сперва жертвуем десятыми
+            }
+            if (tw > avail) {                          // и только потом размером
+                th = 26;
+                u8g2.setFont(u8g2_font_logisoso26_tr);
+                tw = u8g2.getStrWidth(tstr);
+            }
+
+            int xT = CLOCK_MARGIN + (avail - tw) / 2;
+            u8g2.drawStr(xT, TEMP_BASELINE, tstr);
+            u8g2.drawCircle(xT + tw + 4, TEMP_BASELINE - th + 4, 3);   // ° у верха цифр
+        }
 
         u8g2.drawHLine(0, 53, 256);
 
