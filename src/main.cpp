@@ -479,7 +479,7 @@ void loop() {
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
         Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u "
-                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%% pm=%s\n",
+                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%% v=%.2f adc=%umV pm=%s\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
@@ -490,6 +490,7 @@ void loop() {
                       weather.valid ? weather.temperature : 0.0f,
                       weather.valid ? weather.pressure : 0.0f,
                       battery.valid ? battery.percent : -1,
+                      batteryRawVoltage(), (unsigned)batteryAdcMv(),
                       powerModeName());
     }
 

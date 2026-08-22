@@ -1286,12 +1286,15 @@
     } else {
       // Сырое напряжение — единственная зацепка, когда замер ушёл за границы
       // правдоподобия: без него «нет батареи» неотличимо от сбоя делителя.
-      const raw = typeof d.bat_raw_v === 'number' ? d.bat_raw_v : 0;
+      const raw  = typeof d.bat_raw_v === 'number' ? d.bat_raw_v : 0;
+      const over = d.bat_state === 'over';
       document.getElementById('bat-pct').textContent = '—';
       document.getElementById('bat-v').textContent   = raw > 0.05 ? raw.toFixed(2) : '—';
       bf.style.width = '0%';
-      bf.className   = 'batt-fill';
-      note.textContent = raw > 0.05 ? 'no battery · raw' : 'no battery';
+      // Превышение — не «банки нет»: на линии банки что-то постороннее,
+      // и подпись должна звать смотреть схему, а не списывать на USB.
+      bf.className     = 'batt-fill' + (over ? ' crit' : '');
+      note.textContent = over ? 'over-voltage' : raw > 0.05 ? 'no battery · raw' : 'no battery';
     }
 
     // curl-примеры под реальный IP
