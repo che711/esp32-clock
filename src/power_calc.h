@@ -78,6 +78,16 @@ inline bool powerScreenAllowed(PowerMode m, int hour, int onHour, int offHour) {
     return hourInWindow(hour, onHour, offHour);
 }
 
+// То же, но с последним рубежом: когда заряда почти не осталось, панель
+// гасится независимо от режима и расписания. Она — самый крупный потребитель,
+// и её выключение и продлевает работу, и снимает просадку напряжения,
+// из-за которой устройство ушло бы в brownout раньше времени.
+inline bool powerScreenAllowedAt(PowerMode m, int hour, int onHour, int offHour,
+                                 uint8_t pct, bool valid, uint8_t offPct) {
+    if (valid && pct <= offPct) return false;
+    return powerScreenAllowed(m, hour, onHour, offHour);
+}
+
 // Разбор имени режима для API: "normal" | "eco" | "survival".
 inline bool powerModeFromName(const char* s, PowerMode* out) {
     if (!s || !out) return false;

@@ -310,9 +310,18 @@ void test_battery_curve_point() {
     TEST_ASSERT_EQUAL_UINT8(50, batteryVoltageToPercent(3.82f));
 }
 
+// Хвост поджат под реальную отсечку устройства: ниже ~3.6 В диод и LDO
+// уже не держат 3.3 В, поэтому «настоящих» процентов там показывать нечего
+void test_battery_curve_tail_matches_cutoff() {
+    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.70f));
+    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.72f));
+    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.55f));
+    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.45f));
+}
+
 // Середина отрезка 3.68В(10%)…3.74В(20%) — проверяем интерполяцию
 void test_battery_interpolation() {
-    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));
+    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.73f));
 }
 
 // Кривая обязана быть монотонной: выше напряжение — не меньше процент
@@ -484,6 +493,28 @@ void test_power_screen_normal_always_on() {
 void test_power_screen_eco_follows_window() {
     TEST_ASSERT_FALSE(powerScreenAllowed(POWER_ECO, 3, 7, 23));
     TEST_ASSERT_TRUE(powerScreenAllowed(POWER_ECO, 12, 7, 23));
+}
+
+// Экран гасится по заряду независимо от режима и часа
+void test_power_screen_off_on_critical_charge() {
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 5, true, 5));
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 2, true, 5));
+}
+
+void test_power_screen_on_above_critical() {
+    TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 6, true, 5));
+}
+
+// На USB заряда не знаем — порог не применяем
+void test_power_screen_ignores_critical_without_battery() {
+    TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_NORMAL, 12, 7, 23, 0, false, 5));
+}
+
+// Расписание эконома при живом заряде продолжает действовать
+void test_power_screen_critical_and_schedule_combine() {
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 3, 7, 23, 80, true, 5));
+    TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 80, true, 5));
+    TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 4, true, 5));
 }
 
 void test_power_mode_from_name() {
@@ -772,6 +803,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_empty);
     RUN_TEST(test_battery_below_empty);
     RUN_TEST(test_battery_curve_point);
+    RUN_TEST(test_battery_curve_tail_matches_cutoff);
     RUN_TEST(test_battery_interpolation);
     RUN_TEST(test_battery_monotonic);
     RUN_TEST(test_battery_plausible_usb);
@@ -803,6 +835,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_window_whole_day);
     RUN_TEST(test_power_screen_normal_always_on);
     RUN_TEST(test_power_screen_eco_follows_window);
+    RUN_TEST(test_power_screen_off_on_critical_charge);
+    RUN_TEST(test_power_screen_on_above_critical);
+    RUN_TEST(test_power_screen_ignores_critical_without_battery);
+    RUN_TEST(test_power_screen_critical_and_schedule_combine);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
 

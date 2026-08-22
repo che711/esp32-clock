@@ -121,6 +121,25 @@ static int drawBattIcon(int x, int yTop, uint8_t pct) {
     return w + 2;                               // тело + носик
 }
 
+// Крупная перечёркнутая батарея на месте температуры. Когда заряда почти
+// не осталось, это важнее погоды: цифру в углу можно и не заметить, а знак
+// во всё левое поле — нет.
+//
+// Рамка и перечёркивание в две линии: одиночная на 256×64 при низком
+// контрасте теряется, особенно под наклоном.
+static void drawBattWarn(int xLeft, int avail) {
+    const int w = 44, h = 24, nub = 3;
+    int x = xLeft + (avail - (w + nub)) / 2;
+    int y = TEMP_BASELINE - h;
+
+    u8g2.drawFrame(x, y, w, h);
+    u8g2.drawFrame(x + 1, y + 1, w - 2, h - 2);
+    u8g2.drawBox(x + w, y + h / 2 - 4, nub, 8);          // носик
+
+    u8g2.drawLine(x + 4, y + h - 4, x + w - 5, y + 3);   // перечёркивание
+    u8g2.drawLine(x + 5, y + h - 4, x + w - 4, y + 3);
+}
+
 // Нижняя строка: сегменты через точку слева, батарея справа.
 // mark — маркер перед сегментами ("II " на паузе) или nullptr.
 //
@@ -258,28 +277,35 @@ void displayDraw() {
 
         u8g2.drawVLine(xSep, 4, 46);     // разделитель на всю высоту цифр
 
-        // Знак градуса — кружком: в наборе _tr символа ° нет.
-        char tstr[8];
-        if (weather.valid) snprintf(tstr, sizeof(tstr), "%.1f", weather.temperature);
-        else               snprintf(tstr, sizeof(tstr), "--");
+        int leftW = xSep - SEP_GAP - CLOCK_MARGIN;
 
-        int avail = xSep - SEP_GAP - CLOCK_MARGIN - DEGREE_W;
-        int th = 32;
-        u8g2.setFont(u8g2_font_logisoso32_tr);
-        int tw = u8g2.getStrWidth(tstr);
-        if (tw > avail && weather.valid) {         // "-12.3" шире плюсовой:
-            snprintf(tstr, sizeof(tstr), "%.0f", weather.temperature);
-            tw = u8g2.getStrWidth(tstr);           // сперва жертвуем десятыми
-        }
-        if (tw > avail) {                          // и только потом размером
-            th = 26;
-            u8g2.setFont(u8g2_font_logisoso26_tr);
-            tw = u8g2.getStrWidth(tstr);
-        }
+        if (battery.valid && battery.percent <= BATTERY_CRITICAL_PCT) {
+            // Заряд на исходе — вместо погоды предупреждение
+            drawBattWarn(CLOCK_MARGIN, leftW);
+        } else {
+            // Знак градуса — кружком: в наборе _tr символа ° нет.
+            char tstr[8];
+            if (weather.valid) snprintf(tstr, sizeof(tstr), "%.1f", weather.temperature);
+            else               snprintf(tstr, sizeof(tstr), "--");
 
-        int xT = CLOCK_MARGIN + (avail - tw) / 2;
-        u8g2.drawStr(xT, TEMP_BASELINE, tstr);
-        u8g2.drawCircle(xT + tw + 4, TEMP_BASELINE - th + 4, 3);   // ° у верха цифр
+            int avail = leftW - DEGREE_W;
+            int th = 32;
+            u8g2.setFont(u8g2_font_logisoso32_tr);
+            int tw = u8g2.getStrWidth(tstr);
+            if (tw > avail && weather.valid) {         // "-12.3" шире плюсовой:
+                snprintf(tstr, sizeof(tstr), "%.0f", weather.temperature);
+                tw = u8g2.getStrWidth(tstr);           // сперва жертвуем десятыми
+            }
+            if (tw > avail) {                          // и только потом размером
+                th = 26;
+                u8g2.setFont(u8g2_font_logisoso26_tr);
+                tw = u8g2.getStrWidth(tstr);
+            }
+
+            int xT = CLOCK_MARGIN + (avail - tw) / 2;
+            u8g2.drawStr(xT, TEMP_BASELINE, tstr);
+            u8g2.drawCircle(xT + tw + 4, TEMP_BASELINE - th + 4, 3);   // ° у верха цифр
+        }
 
         u8g2.drawHLine(0, 53, 256);
 

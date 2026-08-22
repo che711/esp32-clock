@@ -100,6 +100,8 @@ bool     powerLedEnabled()       { return powerProfile(mode).led; }
 bool     powerWifiWanted()       { return powerProfile(mode).wifi; }
 
 bool powerScreenAllowedNow(int hour) {
-    return powerScreenAllowed(mode, hour,
-                              POWER_SCREEN_ON_HOUR, POWER_SCREEN_OFF_HOUR);
+    return powerScreenAllowedAt(mode, hour,
+                                POWER_SCREEN_ON_HOUR, POWER_SCREEN_OFF_HOUR,
+                                battery.percent, battery.valid,
+                                POWER_SCREEN_OFF_PCT);
 }
