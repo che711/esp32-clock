@@ -652,6 +652,22 @@
       </div>
     </div>
 
+    <div class="bright-block">
+      <div class="bright-top">
+        <div class="bright-left">
+          <div class="tile-label">Power saving</div>
+          <span class="level-chip" id="pm-label">—</span>
+        </div>
+        <div class="seg">
+          <button class="mode-btn active" id="pm-auto"     onclick="setPowerMode('auto')">Auto</button>
+          <button class="mode-btn"        id="pm-normal"   onclick="setPowerMode('normal')">Normal</button>
+          <button class="mode-btn"        id="pm-eco"      onclick="setPowerMode('eco')">Eco</button>
+          <button class="mode-btn"        id="pm-survival" onclick="setPowerMode('survival')">Survival</button>
+        </div>
+      </div>
+      <div class="tile-sub" id="pm-hint">—</div>
+    </div>
+
     <div class="btn-row">
       <button class="btn-action" onclick="exportCsv()">Export CSV</button>
       <button class="btn-action" onclick="exportJson()">Export JSON</button>
@@ -979,6 +995,51 @@
     btn.className   = 'btn-action btn-power ' + (on ? 'on' : 'off');
   }
 
+  // ── Режим энергосбережения ───────────────────────────
+  let pmMode    = 'normal';
+  let pmAuto    = true;
+  let pmPending = false;
+
+  const PM_HINT = {
+    normal:   'Screen always on, sensor every 10 s, radio at full power.',
+    eco:      'Screen dimmed and off 23:00–07:00, sensor every 30 s, radio sleeps longer.',
+    survival: 'Wi-Fi off, screen on schedule only, clock re-synced once a day.'
+  };
+
+  function _applyPowerModeUI() {
+    ['auto', 'normal', 'eco', 'survival'].forEach(k => {
+      const on = pmAuto ? (k === 'auto') : (k === pmMode);
+      document.getElementById('pm-' + k).classList.toggle('active', on);
+    });
+    document.getElementById('pm-label').textContent = pmAuto ? 'auto · ' + pmMode : pmMode;
+    document.getElementById('pm-hint').textContent  = PM_HINT[pmMode] || '';
+  }
+  _applyPowerModeUI();
+
+  function setPowerMode(mode) {
+    // Рисуем выбор сразу, не дожидаясь ответа: пока запрос в пути, приходящие
+    // по WebSocket снимки состояния не должны отыгрывать кнопку назад.
+    pmPending = true;
+    if (mode === 'auto') pmAuto = true;
+    else { pmAuto = false; pmMode = mode; }
+    _applyPowerModeUI();
+
+    fetch('/api/powermode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: mode === 'auto' ? 'auto=1' : 'mode=' + mode
+    })
+    .then(r => r.json())
+    .then(j => {
+      pmMode = j.mode;
+      pmAuto = j.auto === true;
+      _applyPowerModeUI();
+      logEvent('info', 'Power mode: ' + (pmAuto ? 'auto (' + j.mode + ')' : j.mode));
+    })
+    .catch(() => logEvent('error', 'Power mode request failed'))
+    .finally(() => { pmPending = false; });
+  }
+
   // ── WebSocket ────────────────────────────────────────
   let ws, wsReconnectTimer, sawFirstFrame = false;
   function wsConnect() {
@@ -1199,6 +1260,19 @@
     if (d.display_on !== isDisplayOn) {
       _applyPowerUI(d.display_on);
       logEvent('info', 'Display turned ' + (d.display_on ? 'on' : 'off'));
+    }
+
+    if (!pmPending && d.power_mode !== undefined) {
+      const auto    = d.power_auto === true;
+      const changed = d.power_mode !== pmMode;
+      if (changed || auto !== pmAuto) {
+        pmMode = d.power_mode;
+        pmAuto = auto;
+        _applyPowerModeUI();
+        // Автоматика переключилась сама — это событие, о нём стоит сказать
+        if (changed) logEvent(pmMode === 'survival' ? 'warn' : 'info',
+                              'Power mode \u2192 ' + pmMode);
+      }
     }
 
     // WiFi

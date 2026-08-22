@@ -9,6 +9,7 @@
 #include "web_api.h"
 #include "sensor.h"
 #include "battery.h"
+#include "power.h"
 #include "mqtt.h"
 
 // ============================================================
@@ -71,12 +72,32 @@ float dieTempC() {
     return cached;
 }
 
-// ─── Яркость ─────────────────────────────────────────────
+// ─── Яркость и расписание экрана ─────────────────────────
+// В эконом-режимах вне рабочего окна панель гасится совсем: это самая
+// крупная статья расхода, и ночью она всё равно никому не светит.
+// Ручное выключение из дашборда расписание не переигрывает — включаем
+// обратно только то, что сами же и погасили.
+static bool screenOffBySchedule = false;
+
 void applyAutoBrightness() {
-    if (displayIsManual() || !timeSynced) return;
+    if (!timeSynced) return;
     struct tm t;
     if (!localTimeNow(&t)) return;
-    displayAutoForHour(t.tm_hour);
+
+    bool allowed = powerScreenAllowedNow(t.tm_hour);
+    if (!allowed) {
+        if (displayIsOn()) {
+            displaySetPower(false);
+            screenOffBySchedule = true;
+        }
+    } else if (screenOffBySchedule && !displayIsOn()) {
+        displaySetPower(true);
+        screenOffBySchedule = false;
+    } else {
+        screenOffBySchedule = false;
+    }
+
+    displayAutoForHour(t.tm_hour);   // в ручном режиме внутри ничего не делает
 }
 
 // ─── Секундомер: команды ─────────────────────────────────
@@ -125,6 +146,7 @@ static void connectWifi() {
         localIP = WiFi.localIP().toString();
         Serial.printf("\nIP: %s\n", localIP.c_str());
         setRadioSaving(true);
+        powerApplyRadio();          // мощность и listen_interval под режим
         if (MDNS.begin(DEVICE_HOSTNAME)) {
             MDNS.addService("http", "tcp", 80);
             Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
@@ -165,10 +187,62 @@ static void syncNTP() {
     Serial.println(tries < 20 ? " OK" : " TIMEOUT, retry in background");
 }
 
+// Радио в режиме выживания: выключено, но раз в POWER_NTP_WAKE_MS
+// поднимается на POWER_NTP_WAKE_TIMEOUT_MS ради синхронизации часов.
+// Без этого RTC уезжает: у внутреннего генератора точность порядка
+// нескольких секунд в сутки.
+static bool ntpWaking    = false;
+static bool ntpRequested = false;
+static uint32_t ntpWakeStart = 0;
+
+static void radioOff(const char* why) {
+    if (WiFi.getMode() == WIFI_OFF) return;
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    localIP = "";
+    Serial.printf("Power: WiFi off (%s)\n", why);
+}
+
+static void maintainSurvivalRadio(uint32_t now) {
+    if (!ntpWaking) {
+        radioOff("survival");
+        if (now - lastNtpMs >= POWER_NTP_WAKE_MS) {
+            Serial.println("Power: WiFi up for NTP");
+            ntpWaking    = true;
+            ntpRequested = false;
+            ntpWakeStart = now;
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        }
+        return;
+    }
+
+    if (WiFi.status() == WL_CONNECTED && !ntpRequested) {
+        startNTP();                       // демон сам доведёт запрос до конца
+        ntpRequested = true;
+    }
+    if (now - ntpWakeStart >= POWER_NTP_WAKE_TIMEOUT_MS) {
+        ntpWaking = false;
+        // Отметку времени двигаем в любом случае: не достучались до сети —
+        // следующая попытка через сутки, а не в каждой итерации цикла.
+        lastNtpMs = now;
+        radioOff("NTP done");
+    }
+}
+
 // Поддержание сети: реконнект + периодический ре-синк NTP
 static void maintainNetwork() {
     static uint32_t lastCheck = 0;
     uint32_t now = millis();
+
+    if (!powerWifiWanted()) { maintainSurvivalRadio(now); return; }
+
+    // Вернулись из выживания — радио надо поднять заново
+    if (WiFi.getMode() == WIFI_OFF) {
+        ntpWaking = false;
+        connectWifi();
+        return;
+    }
 
     if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
         lastCheck = now;
@@ -242,13 +316,18 @@ static void updateWeather() {
         ledBlinking = false;
     }
 
-    if (now - lastSensorMs >= SENSOR_INTERVAL_MS) {
+    // Период опроса задаёт профиль энергосбережения: в экономе датчик
+    // спрашиваем реже, погода за 30 с никуда не убежит.
+    if (now - lastSensorMs >= powerSensorIntervalMs()) {
         lastSensorMs = now;
         weather = sensorRead();
         battery = batteryRead();
         if (!weather.valid) {
             ledColor(4, 0, 0);                   // красный — ошибка датчика
             ledBlinking = false;                 // горит ровно, не мигок
+        } else if (!powerLedEnabled()) {
+            ledColor(0, 0, 0);                   // в экономе индикация молчит
+            ledBlinking = false;
         } else if (battery.valid && battery.low) {
             ledBlink(6, 3, 0);                   // жёлтый — АКБ разряжена
         } else {
@@ -288,6 +367,7 @@ void setup() {
 
     connectWifi();
     syncNTP();
+    powerBegin();          // профиль применяем, когда экран и радио уже есть
 
     webApiBegin();
 
@@ -298,6 +378,8 @@ void setup() {
 
 void loop() {
     webApiLoop();
+    batteryLoop();            // копит отсчёты АЦП по одному, без задержек
+    powerLoop();              // режим энергосбережения по заряду
     maintainNetwork();
     updateWeather();          // BMP280 + батарея по таймеру + LED
 
@@ -331,7 +413,7 @@ void loop() {
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
         Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u "
-                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%%\n",
+                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%% pm=%s\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
@@ -341,7 +423,8 @@ void loop() {
                       dieTempC(),
                       weather.valid ? weather.temperature : 0.0f,
                       weather.valid ? weather.pressure : 0.0f,
-                      battery.valid ? battery.percent : -1);
+                      battery.valid ? battery.percent : -1,
+                      powerModeName());
     }
 
     // Короткий цикл на ходу: иначе команда стоит в очереди до конца паузы

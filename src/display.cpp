@@ -81,11 +81,24 @@ void displaySetAuto() { manualBrightness = false; }
 
 bool displayIsManual() { return manualBrightness; }
 
+// Масштаб авто-яркости: эконом-режимы прижимают всю шкалу разом, а не
+// правят таблицу часов — деление на «утро/день/вечер/ночь» остаётся.
+static uint8_t autoScalePct = 100;
+
+void displaySetAutoScale(uint8_t pct) {
+    if (pct > 100) pct = 100;
+    autoScalePct = pct;
+}
+
 void displayAutoForHour(int hour) {
     if (manualBrightness) return;
     BrightnessLevel b = brightnessForHour(hour);
-    if (b.contrast != currentContrast) {
-        applyContrast(b.contrast, b.label);
+    // Ниже единицы не опускаемся: 0 у SSD1322 — это не «еле-еле», а погасшая
+    // панель, и экран пропал бы вместо того, чтобы просто потускнеть.
+    uint8_t scaled = (uint8_t)((uint32_t)b.contrast * autoScalePct / 100);
+    if (scaled == 0) scaled = 1;
+    if (scaled != currentContrast) {
+        applyContrast(scaled, b.label);
         Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentContrast);
     }
 }

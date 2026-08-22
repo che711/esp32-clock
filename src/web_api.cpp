@@ -2,6 +2,7 @@
 #include "config.h"
 #include "app.h"
 #include "display.h"
+#include "power.h"
 #include "clock_utils.h"
 #include "origin_check.h"
 #include <WiFi.h>
@@ -82,6 +83,8 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_pct\":%d,"
         "\"bat_v\":%.2f,"
         "\"bat_low\":%s,"
+        "\"power_mode\":\"%s\","
+        "\"power_auto\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -109,6 +112,8 @@ static void buildJson(char* buf, size_t sz) {
         (int)battery.percent,
         battery.voltage,
         battery.low ? "true" : "false",
+        powerModeName(),
+        powerIsAuto() ? "true" : "false",
         (unsigned long)requestCount
     );
 }
@@ -205,6 +210,33 @@ static void handleApiPower() {
     server.send(400, "application/json", "{\"error\":\"missing on param\"}");
 }
 
+// Режим энергосбережения: mode=normal|eco|survival фиксирует уровень,
+// auto=1 возвращает автоматику по заряду.
+static void handleApiPowerMode() {
+    requestCount++;
+    if (!originAccepted()) return sendForeignOrigin();
+
+    if (server.hasArg("auto") && server.arg("auto") != "0") {
+        powerSetAuto();
+    } else if (server.hasArg("mode")) {
+        PowerMode m;
+        if (!powerModeFromName(server.arg("mode").c_str(), &m)) {
+            server.send(400, "application/json", "{\"error\":\"bad mode\"}");
+            return;
+        }
+        powerSetMode(m);
+    } else {
+        server.send(400, "application/json", "{\"error\":\"missing mode or auto\"}");
+        return;
+    }
+
+    char resp[80];
+    snprintf(resp, sizeof(resp), "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s}",
+             powerModeName(), powerIsAuto() ? "true" : "false");
+    server.send(200, "application/json", resp);
+    webApiBroadcast();
+}
+
 static void handleReboot() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
@@ -260,6 +292,7 @@ void webApiBegin() {
     server.on("/api/weather",    HTTP_GET,  handleApiWeather);
     server.on("/api/brightness", HTTP_POST, handleApiBrightness);
     server.on("/api/power",      HTTP_POST, handleApiPower);
+    server.on("/api/powermode",  HTTP_POST, handleApiPowerMode);
     server.on("/api/reboot",     HTTP_POST, handleReboot);
     server.onNotFound(handleNotFound);
     server.begin();

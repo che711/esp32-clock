@@ -37,3 +37,37 @@ inline uint8_t batteryVoltageToPercent(float v) {
     }
     return 0;
 }
+
+// ── Фильтрация замеров ───────────────────────────────────
+//  Wi-Fi потребляет импульсами: в момент передачи ток скачет со ~80
+//  до ~300 мА, и напряжение на банке проваливается на десятки мВ.
+//  Отсчёт, попавший в такой импульс, — выброс, а не измерение.
+//  Среднее размазывает выброс по результату, медиана его отбрасывает.
+
+// Медиана массива. Сортирует его на месте (вставками: n здесь ≤ 32).
+inline uint32_t batteryMedianMv(uint32_t* v, size_t n) {
+    if (n == 0) return 0;
+    for (size_t i = 1; i < n; i++) {
+        uint32_t key = v[i];
+        size_t   j   = i;
+        while (j > 0 && v[j - 1] > key) { v[j] = v[j - 1]; j--; }
+        v[j] = key;
+    }
+    if (n & 1) return v[n / 2];
+    return (v[n / 2 - 1] + v[n / 2]) / 2;
+}
+
+// Экспоненциальное сглаживание между наборами: alpha — вес свежего
+// значения. Напряжение банки за доли секунды физически не меняется,
+// поэтому быстрые движения — помеха, и давить их можно смело.
+inline float batterySmooth(float prev, float fresh, float alpha) {
+    return prev + alpha * (fresh - prev);
+}
+
+// Скачок больше порога — это не помеха, а событие: сняли USB, поменяли
+// банку, сработала защита. Ползти к новому уровню полминуты незачем.
+inline bool batteryJumped(float prev, float fresh, float threshold) {
+    float d = fresh - prev;
+    if (d < 0) d = -d;
+    return d >= threshold;
+}
