@@ -323,9 +323,16 @@
   .pm-switch input:checked ~ .pm-lbl { color: var(--accent); }
   .pm-switch input:focus-visible + .pm-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* Уровнями распоряжается автоматика — показываем выбор, но не даём трогать */
-  .seg.locked { opacity: 0.5; }
-  .seg.locked .mode-btn { pointer-events: none; }
+  /* Пока выбирает автоматика, сегмент приглушён — но не заблокирован: щелчок
+     по уровню и есть команда «зафиксировать этот». Подсвеченный уровень тоже
+     кликабелен (общее правило .mode-btn.active его гасит), иначе закрепить
+     ровно то, что автоматика выбрала сейчас, было бы нечем. */
+  .seg.locked { opacity: 0.62; }
+  .seg.locked .mode-btn { cursor: pointer; }
+  .seg.locked .mode-btn.active { pointer-events: auto; }
+  .seg.locked:hover { opacity: 0.85; }
+  /* Режим держит секундомер: выбор принят, но отложен до сброса замера */
+  .seg.pinned { opacity: 0.62; }
 
   .slider-row { display: flex; align-items: center; gap: 12px; }
   .slider-ico { font-size: 13px; flex-shrink: 0; opacity: 0.6; }
@@ -341,7 +348,11 @@
   input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
   input[type="range"]::-moz-range-thumb { width: 17px; height: 17px; border-radius: 50%;
     background: #fff; border: 3px solid var(--accent); cursor: pointer; }
-  input[type="range"].disabled-slider { opacity: 0.3; pointer-events: none; }
+  /* Авто-режим: ручка приглушена, но рабочая — первое же движение по ней и
+     есть переход в ручной (onSliderInput). Раньше здесь стоял pointer-events:
+     none, и «плавно подкрутить яркость» требовало сперва найти кнопку Manual. */
+  input[type="range"].auto-slider { opacity: 0.45; }
+  input[type="range"].auto-slider:hover { opacity: 0.75; }
   .bright-val { font-family: var(--font-mono); font-size: 14px; font-weight: 600;
                 min-width: 44px; text-align: right; }
 
@@ -621,6 +632,7 @@
           <div>
             <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
             <div class="kv-note" id="bat-note">battery</div>
+            <div class="kv-note" id="bat-mah" title="Inferred from voltage — there is no coulomb counter on board">—</div>
           </div>
         </div>
         <div style="text-align:right">
@@ -668,7 +680,7 @@
       <div class="slider-row">
         <span class="slider-ico">🌑</span>
         <input type="range" id="brightness-slider" min="0" max="100" value="50"
-               class="disabled-slider"
+               class="auto-slider"
                oninput="onSliderInput(this.value)" onchange="sendBrightness(this.value)">
         <span class="slider-ico">☀️</span>
         <span class="bright-val"><span id="brightness-pct">—</span>%</span>
@@ -681,7 +693,8 @@
           <div class="tile-label">Power saving</div>
           <span class="level-chip" id="pm-label">—</span>
         </div>
-        <label class="pm-switch" title="Pick the level automatically from battery charge">
+        <label class="pm-switch"
+               title="Let the charge pick the level. Clicking a level below locks it and turns this off.">
           <input type="checkbox" id="pm-auto" checked onchange="setPowerAuto(this.checked)">
           <span class="pm-track"></span>
           <span class="pm-lbl">By charge</span>
@@ -949,10 +962,58 @@
     slider.style.background =
       'linear-gradient(var(--accent), var(--accent)) 0/' + val + '% 100% no-repeat, var(--track)';
   }
+  // Пока ручка едет, значение уходит по уже открытому WebSocket, а не POST'ом
+  // на каждый пиксель: HTTP-сервер на C6 однопоточный, и очередь коротких
+  // POST'ов он разгребает медленнее, чем палец двигает ручку, — панель
+  // догоняла бы жест с задержкой в полсекунды. Итоговое значение всё равно
+  // закрепляется обычным POST'ом на onchange, так что потерянный по дороге
+  // кадр ничего не решает.
+  const BR_MIN_GAP_MS = 80;              // ~12 кадров в секунду — глазу хватает
+  let brSentAt = 0, brQueued = null, brTimer = null;
+
+  function brPush(val) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;   // сокет лёг — доедет по onchange
+    ws.send('br:' + val);
+    brSentAt = Date.now();
+  }
+
+  function brThrottled(val) {
+    const wait = BR_MIN_GAP_MS - (Date.now() - brSentAt);
+    if (wait <= 0) { brQueued = null; brPush(val); return; }
+    brQueued = val;                      // хвост жеста не теряем: дошлём по таймеру
+    if (brTimer) return;
+    brTimer = setTimeout(() => {
+      brTimer = null;
+      if (brQueued !== null) { const v = brQueued; brQueued = null; brPush(v); }
+    }, wait);
+  }
+
   function onSliderInput(val) {
     val = parseInt(val);
     paintSlider(val);
     document.getElementById('brightness-pct').textContent = val;
+
+    // Первое движение ручки и есть переход в ручной режим — просить сначала
+    // нажать Manual незачем, кнопка остаётся для возврата в авто. Этот шаг
+    // отправляем обычным POST'ом: он же переключает режим на устройстве, и
+    // modeChangePending удержит вид, пока ответ в пути.
+    if (!isManual) {
+      isManual = true;
+      modeChangePending = true;
+      _applyModeUI(true);
+      fetch('/api/brightness', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'value=' + val
+      })
+      .catch(() => logEvent('error', 'Brightness request failed'))
+      .finally(() => { modeChangePending = false; });
+      brSentAt = Date.now();
+      logEvent('info', 'Brightness mode: manual');
+      return;
+    }
+
+    brThrottled(val);
   }
   function sendBrightness(val) {
     fetch('/api/brightness', {
@@ -996,10 +1057,10 @@
     btnManual.classList.remove('active');
     if (manual) {
       btnManual.classList.add('active');
-      slider.classList.remove('disabled-slider');
+      slider.classList.remove('auto-slider');
     } else {
       btnAuto.classList.add('active');
-      slider.classList.add('disabled-slider');
+      slider.classList.add('auto-slider');   // приглушён, но рабочий
     }
   }
 
@@ -1036,26 +1097,39 @@
   }
 
   // ── Режим энергосбережения ───────────────────────────
-  let pmMode    = 'normal';
+  let pmMode    = 'normal';   // что работает прямо сейчас
+  let pmChosen  = 'normal';   // что выбрано руками (в авто — то же самое)
   let pmAuto    = true;
+  let pmPinned  = false;      // секундомер держит normal поверх выбора
   let pmPending = false;
 
   const PM_HINT = {
     normal:   'Screen always on, sensor every 60 s, radio at full power. Auto picks this while the stopwatch runs.',
     eco:      'Default level. Screen dimmed and off 22:00–06:00, sensor every 2 min, radio sleeps longer.',
-    survival: 'Wi-Fi off, screen off 22:00–06:00, clock re-synced once a day. Auto picks this below 10%. Locking it by hand also drops this dashboard — the clock returns to auto after an hour.'
+    survival: 'Wi-Fi off, screen off 22:00–06:00, clock re-synced once a day. Auto picks this below 15% (3.71 V). Locking it by hand also drops this dashboard — the clock returns to auto after an hour.'
   };
+  const PM_PINNED_HINT = 'Stopwatch is running: the clock is held at normal so the count stays visible, and takes this level back on reset. ';
 
   function _applyPowerModeUI() {
+    // Под замером подсвечиваем выбранный уровень, а не рабочий: команду
+    // приняли, она просто ждёт сброса секундомера. Иначе кнопка выглядела бы
+    // ненажатой.
+    const shown = pmPinned ? pmChosen : pmMode;
     ['normal', 'eco', 'survival'].forEach(k => {
-      document.getElementById('pm-' + k).classList.toggle('active', k === pmMode);
+      document.getElementById('pm-' + k).classList.toggle('active', k === shown);
     });
-    // Пока выбирает автоматика, уровни показываем, но трогать не даём:
-    // подсвечен тот, который она выбрала прямо сейчас.
-    document.getElementById('pm-seg').classList.toggle('locked', pmAuto);
+    // Пока выбирает автоматика, сегмент приглушён, но нажимается: щелчок по
+    // уровню и есть «зафиксировать этот» — отдельно снимать тумблер не нужно.
+    const seg = document.getElementById('pm-seg');
+    seg.classList.toggle('locked', pmAuto);
+    seg.classList.toggle('pinned', pmPinned);
     document.getElementById('pm-auto').checked = pmAuto;
-    document.getElementById('pm-label').textContent = pmAuto ? 'auto · ' + pmMode : pmMode;
-    document.getElementById('pm-hint').textContent  = PM_HINT[pmMode] || '';
+    document.getElementById('pm-label').textContent =
+      pmPinned ? pmChosen + ' · held at normal'
+               : pmAuto ? 'auto · ' + pmMode
+                        : pmMode;
+    document.getElementById('pm-hint').textContent =
+      (pmPinned ? PM_PINNED_HINT : '') + (PM_HINT[shown] || '');
   }
   _applyPowerModeUI();
 
@@ -1071,8 +1145,10 @@
     })
     .then(r => r.json())
     .then(j => {
-      pmMode = j.mode;
-      pmAuto = j.auto === true;
+      pmMode   = j.mode;
+      pmChosen = j.chosen || j.mode;
+      pmAuto   = j.auto   === true;
+      pmPinned = j.pinned === true;
       _applyPowerModeUI();
       logEvent('info', note(j));
     })
@@ -1082,16 +1158,22 @@
 
   function setPowerAuto(on) {
     // Выключение тумблера фиксирует то, что автоматика выбрала к этому моменту:
-    // так режим не прыгает под руками в момент переключения.
-    if (!on) return setPowerMode(pmMode);
+    // так режим не прыгает под руками в момент переключения. Под замером
+    // «выбрано» — это отложенный уровень, а не поднятый секундомером normal.
+    if (!on) return setPowerMode(pmPinned ? pmChosen : pmMode);
     pmAuto = true;
     _sendPowerMode('auto=1', j => 'Power mode: auto (' + j.mode + ')');
   }
 
   function setPowerMode(mode) {
-    pmAuto = false;
-    pmMode = mode;
-    _sendPowerMode('mode=' + mode, j => 'Power mode locked: ' + j.mode);
+    // Щелчок по уровню сам снимает автоматику — отдельно трогать тумблер не
+    // надо. Он остаётся дорогой обратно, а не воротами внутрь.
+    pmAuto   = false;
+    pmChosen = mode;
+    pmMode   = mode;
+    _sendPowerMode('mode=' + mode, j => j.pinned
+      ? 'Power mode ' + j.chosen + ' queued — stopwatch holds normal'
+      : 'Power mode locked: ' + j.mode);
   }
 
   // ── WebSocket ────────────────────────────────────────
@@ -1286,12 +1368,17 @@
     // от USB»; вместо этого показываем прочерк и то, что реально намерилось.
     const bf   = document.getElementById('bat-fill');
     const note = document.getElementById('bat-note');
+    const mah = document.getElementById('bat-mah');
     if (d.bat_valid) {
       document.getElementById('bat-pct').textContent = d.bat_pct;
       document.getElementById('bat-v').textContent   = d.bat_v.toFixed(2);
       bf.style.width = d.bat_pct + '%';
       bf.className   = 'batt-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
       note.textContent = 'battery';
+      // Знак «≈» не украшение: мА·ч тут не мерены, а пересчитаны из
+      // напряжения — кулоновского счётчика на плате нет.
+      mah.textContent = (d.bat_mah !== undefined)
+        ? '\u2248 ' + d.bat_mah + ' / ' + d.bat_mah_full + ' mAh' : '';
     } else {
       // Сырое напряжение — единственная зацепка, когда замер ушёл за границы
       // правдоподобия: без него «нет батареи» неотличимо от сбоя делителя.
@@ -1304,6 +1391,7 @@
       // и подпись должна звать смотреть схему, а не списывать на USB.
       bf.className     = 'batt-fill' + (over ? ' crit' : '');
       note.textContent = over ? 'over-voltage' : raw > 0.05 ? 'no battery · raw' : 'no battery';
+      mah.textContent  = '';
     }
 
     // curl-примеры под реальный IP
@@ -1319,7 +1407,10 @@
       document.getElementById('brightness-pct').textContent = pct;
     }
 
-    if (!modeChangePending) {
+    // isDragging здесь наравне с modeChangePending: ручку могли тронуть в
+    // авто-режиме, и до подтверждения от устройства снимок ещё говорит «auto» —
+    // отыграть переключение назад посреди жеста было бы хуже всего.
+    if (!modeChangePending && !isDragging) {
       const serverManual = (d.brightness_manual === true);
       if (serverManual !== isManual) { isManual = serverManual; _applyModeUI(serverManual); }
     }
@@ -1337,10 +1428,14 @@
 
     if (!pmPending && d.power_mode !== undefined) {
       const auto    = d.power_auto === true;
+      const chosen  = d.power_chosen || d.power_mode;
+      const pinned  = d.power_pinned === true;
       const changed = d.power_mode !== pmMode;
-      if (changed || auto !== pmAuto) {
-        pmMode = d.power_mode;
-        pmAuto = auto;
+      if (changed || auto !== pmAuto || chosen !== pmChosen || pinned !== pmPinned) {
+        pmMode   = d.power_mode;
+        pmChosen = chosen;
+        pmAuto   = auto;
+        pmPinned = pinned;
         _applyPowerModeUI();
         // Автоматика переключилась сама — это событие, о нём стоит сказать
         if (changed) logEvent(pmMode === 'survival' ? 'warn' : 'info',

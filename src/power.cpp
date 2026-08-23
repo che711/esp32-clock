@@ -13,6 +13,12 @@
 static PowerMode mode   = POWER_NORMAL;
 static bool      autoBy = POWER_AUTO_DEFAULT;
 
+// Уровень, выбранный руками. Отдельно от mode, потому что эти двое расходятся
+// на время замера: секундомер поднимает mode до обычного независимо от того,
+// что зафиксировал пользователь, а сам выбор ждёт сброса (powerEffectiveMode).
+static PowerMode chosen  = POWER_NORMAL;
+static bool      swPinned = false;
+
 // Срок ручной фиксации выживания; 0 — фиксации нет. Только у этого режима есть
 // срок: он один выключает радио, а значит и путь обратно (см. config.h).
 // Сравнение со знаковой разностью, поэтому переполнение millis() безопасно.
@@ -61,6 +67,7 @@ static void applyProfile() {
 }
 
 void powerBegin() {
+    chosen = mode;
     applyProfile();
 }
 
@@ -75,6 +82,17 @@ static PowerMode evaluateAuto() {
 
 void powerLoop() {
     if (!autoBy) {
+        // Ручная фиксация не отменяет правила «идёт замер — обычный режим»:
+        // секундомер запускают, чтобы на него смотреть, а зафиксированный
+        // эконом ночью держал бы экран погашенным. Выбор пользователя цел,
+        // он лежит в chosen и вернётся, как только замер сбросят.
+        PowerMode want = powerEffectiveMode(chosen, !stopwatch.idle());
+        swPinned = (want != chosen);
+        if (want != mode) {
+            mode = want;
+            applyProfile();
+        }
+
         if (manualSurvivalUntil == 0) return;
         if ((int32_t)(millis() - manualSurvivalUntil) < 0) return;
         Serial.println("Power: manual survival expired -> auto");
@@ -86,7 +104,9 @@ void powerLoop() {
     // применяется только при смене режима.
     PowerMode next = evaluateAuto();
     if (next == mode) return;
-    mode = next;
+    mode     = next;
+    chosen   = next;         // в авто фиксировать нечего: выбор один
+    swPinned = false;
     applyProfile();
 }
 
@@ -96,7 +116,7 @@ bool        powerIsAuto()   { return autoBy; }
 
 void powerSetMode(PowerMode m) {
     autoBy = false;
-    mode   = m;
+    chosen = m;
 
     // Выживание фиксируем со сроком: радио в нём выключено, и снять фиксацию
     // из дашборда потом уже нечем — вернуть автоматику должны мы сами.
@@ -109,15 +129,28 @@ void powerSetMode(PowerMode m) {
         manualSurvivalUntil = 0;
     }
 
+    // Команда принята всегда, но пока идёт замер — откладывается: ронять
+    // связь и гасить экран посреди отсчёта нельзя. Отказывать при этом
+    // незачем, иначе кнопка выглядела бы залипшей.
+    mode     = powerEffectiveMode(chosen, !stopwatch.idle());
+    swPinned = (mode != chosen);
+    if (swPinned)
+        Serial.printf("Power: %s queued, held at normal until stopwatch reset\n",
+                      powerProfile(chosen).name);
+
     applyProfile();
 }
 
 void powerSetAuto() {
     autoBy = true;
     manualSurvivalUntil = 0;
-    mode = evaluateAuto();
+    swPinned = false;
+    mode = chosen = evaluateAuto();
     applyProfile();
 }
+
+bool      powerStopwatchPinned() { return swPinned; }
+PowerMode powerChosenMode()      { return chosen; }
 
 uint32_t powerSensorIntervalMs() { return powerProfile(mode).sensorMs; }
 bool     powerLedEnabled()       { return powerProfile(mode).led; }

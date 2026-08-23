@@ -82,6 +82,15 @@ inline PowerMode powerAutoMode(PowerMode cur, bool stopwatchActive,
     return POWER_ECO;
 }
 
+// Тот же ответ, но для уровня, выбранного руками. powerAutoMode правило
+// «идёт замер — обычный режим» уже знает, а ручная фиксация раньше его
+// обходила: зафиксированный эконом ночью держал экран погашенным, и
+// секундомер шёл вслепую — при том, что запускали его именно чтобы смотреть.
+// Выбор пользователя при этом не теряется: он ждёт сброса секундомера.
+inline PowerMode powerEffectiveMode(PowerMode chosen, bool stopwatchActive) {
+    return stopwatchActive ? POWER_NORMAL : chosen;
+}
+
 // Можно ли держать экран включённым. В обычном режиме — всегда.
 inline bool powerScreenAllowed(PowerMode m, int hour, int onHour, int offHour) {
     if (!powerProfile(m).screenWindow) return true;

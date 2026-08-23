@@ -19,6 +19,13 @@ static WebServer        server(80);
 static WebSocketsServer webSocket(81);
 static uint32_t         requestCount = 0;
 
+// Буфер снимка. Один на все три места, где он собирается, — иначе при
+// добавлении поля легко нарастить формат и забыть один из них: snprintf
+// обрежет строку молча, и дашборд получит JSON без закрывающей скобки.
+// Сейчас снимок занимает ~730 байт; запас — на длинный SSID и на пару
+// будущих полей.
+static const size_t JSON_BUF = 1280;
+
 // ─── Защита изменяющих запросов ───────────────────────────
 // Любая открытая в браузере страница может отправить нам POST или открыть
 // WebSocket — локальная сеть тут не граница, потому что код выполняется
@@ -103,9 +110,13 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_v\":%.2f,"
         "\"bat_raw_v\":%.2f,"
         "\"bat_state\":\"%s\","
+        "\"bat_mah\":%d,"
+        "\"bat_mah_full\":%d,"
         "\"bat_low\":%s,"
         "\"power_mode\":\"%s\","
         "\"power_auto\":%s,"
+        "\"power_chosen\":\"%s\","
+        "\"power_pinned\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -136,16 +147,20 @@ static void buildJson(char* buf, size_t sz) {
         battery.voltage,
         batteryRawVoltage(),
         batteryState(),
+        (int)batteryRemainingMah(battery.percent, BATTERY_USABLE_MAH),
+        (int)BATTERY_USABLE_MAH,
         battery.low ? "true" : "false",
         powerModeName(),
         powerIsAuto() ? "true" : "false",
+        powerProfile(powerChosenMode()).name,
+        powerStopwatchPinned() ? "true" : "false",
         (unsigned long)requestCount
     );
 }
 
 void webApiBroadcast() {
     if (webSocket.connectedClients() == 0) return;  // некому слать — не тратим CPU
-    char json[1024];
+    char json[JSON_BUF];
     buildJson(json, sizeof(json));
     webSocket.broadcastTXT(json);
 }
@@ -161,7 +176,7 @@ static void handleRoot() {
 
 static void handleApiStats() {
     requestCount++;
-    char json[1024];
+    char json[JSON_BUF];
     buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
@@ -258,9 +273,16 @@ static void handleApiPowerMode() {
         return;
     }
 
-    char resp[80];
-    snprintf(resp, sizeof(resp), "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s}",
-             powerModeName(), powerIsAuto() ? "true" : "false");
+    // mode — что работает сейчас, chosen — что выбрано. Под замером они
+    // расходятся: секундомер держит «обычный» поверх ручного выбора, и
+    // дашборду надо показать принятую команду, а не поднятый уровень.
+    char resp[144];
+    snprintf(resp, sizeof(resp),
+             "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s,"
+             "\"chosen\":\"%s\",\"pinned\":%s}",
+             powerModeName(), powerIsAuto() ? "true" : "false",
+             powerProfile(powerChosenMode()).name,
+             powerStopwatchPinned() ? "true" : "false");
     server.send(200, "application/json", resp);
     webApiBroadcast();
 }
@@ -282,7 +304,7 @@ static void handleNotFound() {
 static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
         requestCount++;
-        char json[1024];
+        char json[JSON_BUF];
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
@@ -297,6 +319,28 @@ static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t 
                      (int)stopwatch.state,
                      (unsigned long)stopwatch.elapsed(millis()));
             webSocket.sendTXT(num, reply);
+            return;
+        }
+
+        // Живая яркость: "br:<0..100>" или "br:auto". Ползунок шлёт значение
+        // на каждый шаг жеста, поэтому этот путь обрабатывается до логов и до
+        // рассылки — десяток строк в Serial и десяток килобайт JSON в секунду
+        // стоили бы дороже самой регулировки. Отправитель значение и так знает,
+        // остальные вкладки увидят его ближайшим снимком (раз в секунду).
+        if (length > 3 && strncmp((char*)payload, "br:", 3) == 0) {
+            char val[8] = {0};
+            size_t n = length - 3;
+            if (n > sizeof(val) - 1) n = sizeof(val) - 1;
+            memcpy(val, payload + 3, n);
+            if (strcmp(val, "auto") == 0) {
+                displaySetAuto();
+                applyAutoBrightness();
+            } else {
+                int pct = atoi(val);
+                if (pct < 0)   pct = 0;
+                if (pct > 100) pct = 100;
+                displaySetManualPct(pct);
+            }
             return;
         }
 

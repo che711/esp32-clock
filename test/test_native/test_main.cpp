@@ -420,18 +420,43 @@ void test_battery_curve_point() {
     TEST_ASSERT_EQUAL_UINT8(50, batteryVoltageToPercent(3.82f));
 }
 
-// Хвост поджат под реальную отсечку устройства: ниже ~3.6 В диод и LDO
-// уже не держат 3.3 В, поэтому «настоящих» процентов там показывать нечего
+// Ноль шкалы — на отсечке устройства, а не элемента: ниже ~3.55 В диод и LDO
+// уже не держат 3.3 В, и оставшаяся ёмкость банки этим часам недоступна
 void test_battery_curve_tail_matches_cutoff() {
-    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.70f));
-    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.72f));
-    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.55f));
+    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.68f));
+    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.60f));
+    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.50f));
     TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.45f));
+}
+
+// Хвост должен быть растянут, а не поджат: на пункт шкалы внизу приходится
+// заметно больше милливольт, чем шумит АЦП, иначе индикатор дрожит на месте.
+// Между 3.74 В и 3.68 В — десять пунктов, то есть 6 мВ на пункт (было 2 мВ),
+// ниже — ещё положе. Проверяем только хвост: середина кривой круче по
+// физике элемента (на плато 3.77…3.79 В лежат целых десять процентов),
+// и растягивать её было бы не честнее, а наоборот.
+void test_battery_tail_is_not_steeper_than_adc_noise() {
+    const int NOISE_MV = 4;              // шум медианы набора — единицы мВ
+    for (int mv = 3500; mv + NOISE_MV <= 3740; mv++) {
+        uint8_t lo = batteryVoltageToPercent(mv / 1000.0f);
+        uint8_t hi = batteryVoltageToPercent((mv + NOISE_MV) / 1000.0f);
+        TEST_ASSERT_TRUE_MESSAGE(hi - lo <= 1,
+                                 "хвост кривой круче одного пункта на 4 мВ");
+    }
 }
 
 // Середина отрезка 3.68В(10%)…3.74В(20%) — проверяем интерполяцию
 void test_battery_interpolation() {
-    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.73f));
+    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));
+}
+
+// Пороги режимов заданы в процентах, но настраивались по напряжению.
+// Кривая и config.h должны сходиться: радио выключается раньше экрана,
+// и оба рубежа — выше отсечки железа.
+void test_battery_thresholds_land_where_intended() {
+    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));  // survival
+    TEST_ASSERT_EQUAL_UINT8(5,      batteryVoltageToPercent(3.60f));  // экран прочь
+    TEST_ASSERT_EQUAL_UINT8(20,     batteryVoltageToPercent(3.74f));  // BATTERY_LOW_V
 }
 
 // Кривая обязана быть монотонной: выше напряжение — не меньше процент
@@ -443,6 +468,20 @@ void test_battery_monotonic() {
         prev = pct;
     }
     TEST_ASSERT_EQUAL_UINT8(100, prev);
+}
+
+// Пересчёт процентов в мА·ч. Шкала идёт по доступной ёмкости, а не по
+// паспортной: сотня — это полный бак этих часов (~2600 мА·ч), а не полная
+// банка (~3300). Остальные ~700 лежат ниже отсечки 3.5 В.
+void test_battery_mah_scale_is_usable_capacity() {
+    TEST_ASSERT_EQUAL_UINT16(2600, batteryRemainingMah(100, 2600));
+    TEST_ASSERT_EQUAL_UINT16(1300, batteryRemainingMah(50,  2600));
+    TEST_ASSERT_EQUAL_UINT16(0,    batteryRemainingMah(0,   2600));
+}
+
+// Битый процент выше сотни не должен давать больше полной банки
+void test_battery_mah_clamps_above_full() {
+    TEST_ASSERT_EQUAL_UINT16(2600, batteryRemainingMah(200, 2600));
 }
 
 void test_battery_plausible_usb() {
@@ -693,6 +732,35 @@ void test_power_screen_critical_and_schedule_combine() {
     TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 3, 7, 23, 80, true, 5));
     TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 80, true, 5));
     TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 4, true, 5));
+}
+
+// Секундомер поднимает уровень поверх ручной фиксации: замер запускают,
+// чтобы на него смотреть, а зафиксированный эконом ночью гасит экран.
+void test_power_effective_mode_stopwatch_beats_manual_eco() {
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_ECO, true));
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_SURVIVAL, true));
+}
+
+// Выбор пользователя не теряется — он возвращается со сбросом замера
+void test_power_effective_mode_restores_choice() {
+    TEST_ASSERT_EQUAL_INT(POWER_ECO,      powerEffectiveMode(POWER_ECO, false));
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL, powerEffectiveMode(POWER_SURVIVAL, false));
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,   powerEffectiveMode(POWER_NORMAL, false));
+}
+
+// В «обычном» поднимать нечего — фиксации не возникает
+void test_power_effective_mode_normal_is_not_pinned() {
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_NORMAL, true));
+}
+
+// Экран под замером горит в любой час: профиль «обычный» окна не знает
+void test_power_screen_on_at_night_while_stopwatch_runs() {
+    PowerMode m = powerEffectiveMode(POWER_ECO, true);
+    TEST_ASSERT_TRUE(powerScreenAllowed(m, 3, 6, 22));    // 03:00, ночь
+    TEST_ASSERT_TRUE(powerScreenAllowed(m, 23, 6, 22));   // 23:00
+    // Без замера тот же час экран гасит — правило именно про замер
+    TEST_ASSERT_FALSE(powerScreenAllowed(powerEffectiveMode(POWER_ECO, false),
+                                         3, 6, 22));
 }
 
 void test_power_mode_from_name() {
@@ -991,8 +1059,12 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_below_empty);
     RUN_TEST(test_battery_curve_point);
     RUN_TEST(test_battery_curve_tail_matches_cutoff);
+    RUN_TEST(test_battery_tail_is_not_steeper_than_adc_noise);
     RUN_TEST(test_battery_interpolation);
+    RUN_TEST(test_battery_thresholds_land_where_intended);
     RUN_TEST(test_battery_monotonic);
+    RUN_TEST(test_battery_mah_scale_is_usable_capacity);
+    RUN_TEST(test_battery_mah_clamps_above_full);
     RUN_TEST(test_battery_plausible_usb);
     RUN_TEST(test_battery_plausible_battery);
     RUN_TEST(test_battery_plausible_full_with_calibration);
@@ -1035,6 +1107,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_screen_ignores_critical_without_battery);
     RUN_TEST(test_power_screen_battery_gate_needs_no_hour);
     RUN_TEST(test_power_screen_critical_and_schedule_combine);
+    RUN_TEST(test_power_effective_mode_stopwatch_beats_manual_eco);
+    RUN_TEST(test_power_effective_mode_restores_choice);
+    RUN_TEST(test_power_effective_mode_normal_is_not_pinned);
+    RUN_TEST(test_power_screen_on_at_night_while_stopwatch_runs);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
 

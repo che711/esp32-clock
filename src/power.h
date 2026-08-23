@@ -22,6 +22,12 @@ bool        powerIsAuto();
 void powerSetMode(PowerMode m);   // зафиксировать режим вручную
 void powerSetAuto();              // вернуть автоматику по заряду
 
+// Идёт замер, и он держит уровень «обычный» поверх ручного выбора. Нужно
+// дашборду: без этого зафиксированный эконом с подсвеченным «normal» выглядит
+// как не сработавшая кнопка, а не как «вернём после сброса».
+bool        powerStopwatchPinned();
+PowerMode   powerChosenMode();    // что выбрано руками (в авто — текущее)
+
 // Параметры текущего профиля — их читает main.cpp
 uint32_t powerSensorIntervalMs();
 bool     powerLedEnabled();
