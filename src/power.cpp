@@ -13,6 +13,11 @@
 static PowerMode mode   = POWER_NORMAL;
 static bool      autoBy = POWER_AUTO_DEFAULT;
 
+// Срок ручной фиксации выживания; 0 — фиксации нет. Только у этого режима есть
+// срок: он один выключает радио, а значит и путь обратно (см. config.h).
+// Сравнение со знаковой разностью, поэтому переполнение millis() безопасно.
+static uint32_t  manualSurvivalUntil = 0;
+
 // Мощность передатчика задаётся перечислением, не числом: округляем
 // вниз до ближайшего доступного шага, чтобы профиль оставался просто
 // числом в dBm и не тянул за собой заголовки Arduino.
@@ -69,7 +74,13 @@ static PowerMode evaluateAuto() {
 }
 
 void powerLoop() {
-    if (!autoBy) return;
+    if (!autoBy) {
+        if (manualSurvivalUntil == 0) return;
+        if ((int32_t)(millis() - manualSurvivalUntil) < 0) return;
+        Serial.println("Power: manual survival expired -> auto");
+        powerSetAuto();          // он же снимет срок и поднимет радио обратно
+        return;
+    }
     // Без троттлинга: старт секундомера должен поднимать режим сразу, а не
     // через несколько секунд. Сама проверка — пара сравнений, профиль
     // применяется только при смене режима.
@@ -85,13 +96,25 @@ bool        powerIsAuto()   { return autoBy; }
 
 void powerSetMode(PowerMode m) {
     autoBy = false;
-    if (m == mode) { applyProfile(); return; }
-    mode = m;
+    mode   = m;
+
+    // Выживание фиксируем со сроком: радио в нём выключено, и снять фиксацию
+    // из дашборда потом уже нечем — вернуть автоматику должны мы сами.
+    if (m == POWER_SURVIVAL) {
+        manualSurvivalUntil = millis() + POWER_MANUAL_SURVIVAL_MS;
+        if (manualSurvivalUntil == 0) manualSurvivalUntil = 1;  // 0 занят
+        Serial.printf("Power: survival locked for %lu min, then back to auto\n",
+                      (unsigned long)(POWER_MANUAL_SURVIVAL_MS / 60000UL));
+    } else {
+        manualSurvivalUntil = 0;
+    }
+
     applyProfile();
 }
 
 void powerSetAuto() {
     autoBy = true;
+    manualSurvivalUntil = 0;
     mode = evaluateAuto();
     applyProfile();
 }
@@ -100,12 +123,19 @@ uint32_t powerSensorIntervalMs() { return powerProfile(mode).sensorMs; }
 bool     powerLedEnabled()       { return powerProfile(mode).led; }
 bool     powerWifiWanted()       { return powerProfile(mode).wifi; }
 
-bool powerScreenAllowedNow(int hour) {
+bool powerScreenBatteryOkNow() {
+    return powerScreenBatteryOk(battery.percent, battery.valid,
+                                POWER_SCREEN_OFF_PCT);
+}
+
+bool powerScreenScheduleAllowsNow(int hour) {
     // Ночное окно осталось только за экраном: сам режим от часа не зависит,
     // а подсветке разрешено гореть ровно в «не ночь» — границы те же,
     // вывернутые.
-    return powerScreenAllowedAt(mode, hour,
-                                POWER_NIGHT_OFF_HOUR, POWER_NIGHT_ON_HOUR,
-                                battery.percent, battery.valid,
-                                POWER_SCREEN_OFF_PCT);
+    return powerScreenAllowed(mode, hour,
+                              POWER_NIGHT_OFF_HOUR, POWER_NIGHT_ON_HOUR);
+}
+
+bool powerScreenAllowedNow(int hour) {
+    return powerScreenBatteryOkNow() && powerScreenScheduleAllowsNow(hour);
 }

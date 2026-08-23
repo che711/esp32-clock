@@ -97,17 +97,30 @@ static bool screenPeekActive(uint32_t now) {
     return true;
 }
 
-void applyAutoBrightness() {
-    if (!timeSynced) return;
-    struct tm t;
-    if (!localTimeNow(&t)) return;
+// Час известен — ставим уровень по расписанию, нет — уровень «времени нет».
+// В ручном режиме обе функции внутри ничего не делают.
+static void applyAutoLevelFor(bool haveHour, int hour) {
+    if (haveHour) displayAutoForHour(hour);
+    else          displayAutoNoTime();
+}
 
-    bool allowed = powerScreenAllowedNow(t.tm_hour);
+void applyAutoBrightness() {
+    struct tm t;
+    // Раньше функция выходила первой же строкой по !timeSynced — и вместе с
+    // расписанием отключались и яркость, и рубеж по заряду: без синхронизации
+    // NTP панель оставалась на стартовом уровне, а порог POWER_SCREEN_OFF_PCT
+    // не срабатывал никогда. Устройство без сети жгло экран до brownout.
+    // Теперь без времени пропускается только то, что без часа не считается.
+    bool haveHour = timeSynced && localTimeNow(&t);
+    int  hour     = haveHour ? t.tm_hour : 0;
+
+    bool allowed = powerScreenBatteryOkNow()
+                   && (!haveHour || powerScreenScheduleAllowsNow(hour));
 
     // Пока идёт подсветка, расписание уступает — но только ей одной:
     // истечёт окно, и ближайший же заход погасит панель обычным путём.
     if (!allowed && screenPeekActive(millis())) {
-        displayAutoForHour(t.tm_hour);
+        applyAutoLevelFor(haveHour, hour);
         return;
     }
 
@@ -127,7 +140,7 @@ void applyAutoBrightness() {
         screenOffBySchedule = false;
     }
 
-    displayAutoForHour(t.tm_hour);   // в ручном режиме внутри ничего не делает
+    applyAutoLevelFor(haveHour, hour);
 }
 
 // Сколько ещё гореть по подсветке, секунды; 0 — подсветки нет. Нужно
@@ -209,6 +222,9 @@ static void connectWifi() {
         Serial.printf("\nIP: %s\n", localIP.c_str());
         setRadioSaving(true);
         powerApplyRadio();          // мощность и listen_interval под режим
+        // end() перед begin(): сюда заходят и повторно — после возврата из
+        // выживания, где радио выключалось вместе с ответчиком mDNS.
+        MDNS.end();
         if (MDNS.begin(DEVICE_HOSTNAME)) {
             MDNS.addService("http", "tcp", 80);
             Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
@@ -299,8 +315,10 @@ static void maintainNetwork() {
 
     if (!powerWifiWanted()) { maintainSurvivalRadio(now); return; }
 
-    // Вернулись из выживания — радио надо поднять заново
-    if (WiFi.getMode() == WIFI_OFF) {
+    // Вернулись из выживания — радио надо поднять заново. Случай ntpWaking
+    // отдельно: там радио уже в STA, и без этой ветки соединение осталось бы
+    // недоделанным — без localIP и без mDNS, то есть дашборд не найти.
+    if (WiFi.getMode() == WIFI_OFF || ntpWaking) {
         ntpWaking = false;
         connectWifi();
         return;

@@ -27,6 +27,11 @@ uint32_t powerSensorIntervalMs();
 bool     powerLedEnabled();
 bool     powerWifiWanted();               // false — радио должно быть выключено
 bool     powerScreenAllowedNow(int hour); // false — экран гасим по расписанию
+// Те же два условия по отдельности. Нужны, когда часы ещё не встали: расписание
+// без времени применить не к чему, а рубеж по заряду от часа не зависит и
+// работать обязан всегда.
+bool     powerScreenBatteryOkNow();       // false — заряд на исходе, панель гасим
+bool     powerScreenScheduleAllowsNow(int hour);
 
 // Радио сконфигурировать под текущий профиль. Вызывать после
 // подключения: до него esp_wifi_* возвращают ошибку.

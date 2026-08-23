@@ -43,32 +43,67 @@ void test_uptime_large() {
 // ─── Яркость ─────────────────────────────────────────────
 void test_brightness_night_22() {
     BrightnessLevel b = brightnessForHour(22);
-    TEST_ASSERT_EQUAL_UINT8(15, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_NIGHT, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Night", b.label);
 }
 
 void test_brightness_night_3() {
     BrightnessLevel b = brightnessForHour(3);
-    TEST_ASSERT_EQUAL_UINT8(15, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_NIGHT, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Night", b.label);
 }
 
 void test_brightness_morning() {
     BrightnessLevel b = brightnessForHour(7);
-    TEST_ASSERT_EQUAL_UINT8(80, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_MORNING, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Morning", b.label);
 }
 
 void test_brightness_day() {
     BrightnessLevel b = brightnessForHour(12);
-    TEST_ASSERT_EQUAL_UINT8(200, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_DAY, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Day", b.label);
 }
 
 void test_brightness_evening() {
     BrightnessLevel b = brightnessForHour(21);
-    TEST_ASSERT_EQUAL_UINT8(120, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_EVENING, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Evening", b.label);
+}
+
+// Таблица часов задана на перцептивной шкале, а светимость должна остаться
+// той, что была до перехода на гамму: тогда числа уезжали прямо в регистр
+// тока. Этот тест и держит пересчёт — иначе таблицу снова однажды прочтут
+// как доли тока и ночь опять просядет в тридцать раз.
+static void assertAutoLevelDrive(uint8_t level, uint8_t legacyContrast) {
+    float want = (float)(legacyContrast + 1) / 256.0f;
+    float got  = panelDriveFraction(panelDriveForLevel(level));
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, want, got);
+}
+
+void test_brightness_levels_keep_pre_gamma_output() {
+    assertAutoLevelDrive(CONTRAST_NIGHT,    15);
+    assertAutoLevelDrive(CONTRAST_MORNING,  80);
+    assertAutoLevelDrive(CONTRAST_EVENING, 120);
+    assertAutoLevelDrive(CONTRAST_DAY,     200);
+}
+
+// Уровень, на который встаёт «включить экран» при нулевой яркости, обязан быть
+// видимым: единица по гамме — это 1/4096 тока, панель на ней неотличима от
+// выключенной, и экран числился включённым, оставаясь чёрным.
+void test_min_visible_level_is_actually_visible() {
+    float f = panelDriveFraction(panelDriveForLevel(CONTRAST_MIN_VISIBLE));
+    TEST_ASSERT_TRUE(f > 20.0f * panelDriveFraction(panelDriveForLevel(1)));
+    TEST_ASSERT_TRUE(f >= 1.0f / 256.0f);
+}
+
+// Часы не встали — уровень всё равно должен быть выставлен, и не максимальный:
+// именно на максимуме панель раньше и оставалась без синхронизации NTP.
+void test_brightness_no_time_is_not_full_scale() {
+    BrightnessLevel b = brightnessNoTime();
+    TEST_ASSERT_TRUE(b.contrast > 0);
+    TEST_ASSERT_TRUE(b.contrast < CONTRAST_MAX);
+    TEST_ASSERT_EQUAL_STRING("No time", b.label);
 }
 
 void test_brightness_boundary_6() {
@@ -571,6 +606,15 @@ void test_power_screen_ignores_critical_without_battery() {
 }
 
 // Расписание эконома при живом заряде продолжает действовать
+// Рубеж по заряду обязан считаться без часа: он вынесен из расписания именно
+// затем, чтобы работать и тогда, когда время не синхронизировалось.
+void test_power_screen_battery_gate_needs_no_hour() {
+    TEST_ASSERT_FALSE(powerScreenBatteryOk(5, true, 5));
+    TEST_ASSERT_FALSE(powerScreenBatteryOk(0, true, 5));
+    TEST_ASSERT_TRUE(powerScreenBatteryOk(6, true, 5));
+    TEST_ASSERT_TRUE(powerScreenBatteryOk(0, false, 5));   // банки нет — не наш случай
+}
+
 void test_power_screen_critical_and_schedule_combine() {
     TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 3, 7, 23, 80, true, 5));
     TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 80, true, 5));
@@ -817,6 +861,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_brightness_morning);
     RUN_TEST(test_brightness_day);
     RUN_TEST(test_brightness_evening);
+    RUN_TEST(test_brightness_levels_keep_pre_gamma_output);
+    RUN_TEST(test_min_visible_level_is_actually_visible);
+    RUN_TEST(test_brightness_no_time_is_not_full_scale);
     RUN_TEST(test_brightness_boundary_6);
     RUN_TEST(test_brightness_boundary_8);
     RUN_TEST(test_brightness_boundary_20);
@@ -906,6 +953,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_screen_off_on_critical_charge);
     RUN_TEST(test_power_screen_on_above_critical);
     RUN_TEST(test_power_screen_ignores_critical_without_battery);
+    RUN_TEST(test_power_screen_battery_gate_needs_no_hour);
     RUN_TEST(test_power_screen_critical_and_schedule_combine);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
