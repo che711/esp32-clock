@@ -13,14 +13,18 @@
 static PowerMode mode   = POWER_NORMAL;
 static bool      autoBy = POWER_AUTO_DEFAULT;
 
-// Уровень, выбранный руками. Отдельно от mode, потому что эти двое расходятся
-// на время замера: секундомер поднимает mode до обычного независимо от того,
-// что зафиксировал пользователь, а сам выбор ждёт сброса (powerEffectiveMode).
-static PowerMode chosen  = POWER_NORMAL;
-static bool      swPinned = false;
+// Уровень, выбранный руками. Отдельно от mode, потому что эти двое расходятся,
+// когда выбор поправляет обстоятельство сильнее вкуса: замер поднимает уровень
+// до обычного, низкий заряд опускает до выживания, поднявшаяся банка из
+// выживания выпускает. Правила — в powerManualMode(), причина — в holdWhy.
+// Сам выбор при этом цел и вступает в силу, когда помеха отпадёт.
+static PowerMode chosen   = POWER_NORMAL;
+static PowerHold holdWhy  = POWER_HOLD_NONE;
 
-// Срок ручной фиксации выживания; 0 — фиксации нет. Только у этого режима есть
-// срок: он один выключает радио, а значит и путь обратно (см. config.h).
+// Срок ручной фиксации выживания; 0 — фиксации нет. Теперь это подстраховка,
+// а не единственный выход: из выживания выпускает и поднявшийся заряд
+// (powerManualMode). Срок остаётся на случай, когда банка так и не подросла —
+// тогда через час решение возвращается автоматике.
 // Сравнение со знаковой разностью, поэтому переполнение millis() безопасно.
 static uint32_t  manualSurvivalUntil = 0;
 
@@ -71,6 +75,14 @@ void powerBegin() {
     applyProfile();
 }
 
+// Рабочий уровень при ручной фиксации: выбор пользователя плюс поправки на
+// секундомер и заряд. Заодно обновляет причину, по которой они разошлись.
+static PowerMode evaluateManual() {
+    return powerManualMode(mode, chosen, !stopwatch.idle(),
+                           battery.percent, battery.valid,
+                           POWER_SURVIVAL_PCT, POWER_HYSTERESIS_PCT, &holdWhy);
+}
+
 // Решение автоматики на текущий момент. Время суток здесь не участвует:
 // ночью экран гасит расписание эконома, режим от часа не зависит.
 static PowerMode evaluateAuto() {
@@ -82,12 +94,12 @@ static PowerMode evaluateAuto() {
 
 void powerLoop() {
     if (!autoBy) {
-        // Ручная фиксация не отменяет правила «идёт замер — обычный режим»:
-        // секундомер запускают, чтобы на него смотреть, а зафиксированный
-        // эконом ночью держал бы экран погашенным. Выбор пользователя цел,
-        // он лежит в chosen и вернётся, как только замер сбросят.
-        PowerMode want = powerEffectiveMode(chosen, !stopwatch.idle());
-        swPinned = (want != chosen);
+        // Ручная фиксация — предпочтение, а не последнее слово: секундомер и
+        // заряд её поправляют (powerManualMode). Раньше эта ветка заряд не
+        // смотрела вовсе, и выживание, зафиксированное руками, не отпускало
+        // даже полную банку — а зафиксированный обычный режим не уходил в
+        // выживание никогда. Выбор при этом цел: он в chosen.
+        PowerMode want = evaluateManual();
         if (want != mode) {
             mode = want;
             applyProfile();
@@ -102,11 +114,11 @@ void powerLoop() {
     // Без троттлинга: старт секундомера должен поднимать режим сразу, а не
     // через несколько секунд. Сама проверка — пара сравнений, профиль
     // применяется только при смене режима.
+    holdWhy = POWER_HOLD_NONE;   // в авто расходиться нечему: выбор один
     PowerMode next = evaluateAuto();
     if (next == mode) return;
-    mode     = next;
-    chosen   = next;         // в авто фиксировать нечего: выбор один
-    swPinned = false;
+    mode   = next;
+    chosen = next;
     applyProfile();
 }
 
@@ -129,14 +141,15 @@ void powerSetMode(PowerMode m) {
         manualSurvivalUntil = 0;
     }
 
-    // Команда принята всегда, но пока идёт замер — откладывается: ронять
-    // связь и гасить экран посреди отсчёта нельзя. Отказывать при этом
-    // незачем, иначе кнопка выглядела бы залипшей.
-    mode     = powerEffectiveMode(chosen, !stopwatch.idle());
-    swPinned = (mode != chosen);
-    if (swPinned)
-        Serial.printf("Power: %s queued, held at normal until stopwatch reset\n",
-                      powerProfile(chosen).name);
+    // Команда принята всегда, но может быть отложена: замер держит обычный
+    // режим, низкий заряд — выживание, а поднявшаяся банка не даёт уйти в
+    // выживание. Отказывать при этом незачем, иначе кнопка выглядела бы
+    // залипшей; выбор лежит в chosen и вступит в силу, когда помеха отпадёт.
+    mode = evaluateManual();
+    if (holdWhy != POWER_HOLD_NONE)
+        Serial.printf("Power: %s queued, running %s (%s)\n",
+                      powerProfile(chosen).name, powerProfile(mode).name,
+                      powerHoldName(holdWhy));
 
     applyProfile();
 }
@@ -144,13 +157,14 @@ void powerSetMode(PowerMode m) {
 void powerSetAuto() {
     autoBy = true;
     manualSurvivalUntil = 0;
-    swPinned = false;
+    holdWhy = POWER_HOLD_NONE;
     mode = chosen = evaluateAuto();
     applyProfile();
 }
 
-bool      powerStopwatchPinned() { return swPinned; }
-PowerMode powerChosenMode()      { return chosen; }
+bool        powerIsHeld()     { return holdWhy != POWER_HOLD_NONE; }
+const char* powerHoldReason() { return powerHoldName(holdWhy); }
+PowerMode   powerChosenMode() { return chosen; }
 
 uint32_t powerSensorIntervalMs() { return powerProfile(mode).sensorMs; }
 bool     powerLedEnabled()       { return powerProfile(mode).led; }

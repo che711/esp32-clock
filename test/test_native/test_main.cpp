@@ -736,31 +736,121 @@ void test_power_screen_critical_and_schedule_combine() {
 
 // Секундомер поднимает уровень поверх ручной фиксации: замер запускают,
 // чтобы на него смотреть, а зафиксированный эконом ночью гасит экран.
-void test_power_effective_mode_stopwatch_beats_manual_eco() {
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_ECO, true));
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_SURVIVAL, true));
+void test_power_manual_stopwatch_beats_choice() {
+    PowerHold why = POWER_HOLD_NONE;
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,
+        powerManualMode(POWER_ECO, POWER_ECO, true, 80, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_STOPWATCH, why);
+    // Даже на исходе банки: правило то же, что у автоматики
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,
+        powerManualMode(POWER_ECO, POWER_ECO, true, 3, true, 15, 5, &why));
 }
 
-// Выбор пользователя не теряется — он возвращается со сбросом замера
-void test_power_effective_mode_restores_choice() {
-    TEST_ASSERT_EQUAL_INT(POWER_ECO,      powerEffectiveMode(POWER_ECO, false));
-    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL, powerEffectiveMode(POWER_SURVIVAL, false));
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,   powerEffectiveMode(POWER_NORMAL, false));
+// Выбор пользователя не теряется — он возвращается, когда помеха отпала
+void test_power_manual_restores_choice() {
+    PowerHold why = POWER_HOLD_STOPWATCH;
+    TEST_ASSERT_EQUAL_INT(POWER_ECO,
+        powerManualMode(POWER_ECO, POWER_ECO, false, 80, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_NONE, why);
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,
+        powerManualMode(POWER_NORMAL, POWER_NORMAL, false, 80, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_NONE, why);
 }
 
-// В «обычном» поднимать нечего — фиксации не возникает
-void test_power_effective_mode_normal_is_not_pinned() {
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_NORMAL, true));
+// Заряженная банка выпускает из выживания, кто бы его ни включил. Раньше
+// ручная фиксация заряд не смотрела вовсе, и выход был только по сроку —
+// то есть полная банка ничего не меняла.
+void test_power_manual_survival_released_by_charge() {
+    PowerHold why = POWER_HOLD_NONE;
+    TEST_ASSERT_EQUAL_INT(POWER_ECO,
+        powerManualMode(POWER_SURVIVAL, POWER_SURVIVAL, false, 100, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_CHARGED, why);
+    TEST_ASSERT_EQUAL_INT(POWER_ECO,
+        powerManualMode(POWER_SURVIVAL, POWER_SURVIVAL, false, 20, true, 15, 5, &why));
+}
+
+// Но не раньше порога с запасом: на 19 % выбор ещё в силе, иначе режим
+// дребезжал бы на границе ровно там, где связь то появляется, то нет
+void test_power_manual_survival_holds_inside_hysteresis() {
+    PowerHold why = POWER_HOLD_NONE;
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_SURVIVAL, POWER_SURVIVAL, false, 19, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_NONE, why);   // это выбор, а не поправка
+}
+
+// Обратная дыра: зафиксированный обычный режим на исходе банки жёг радио
+// до brownout — заряд его не трогал вовсе
+void test_power_manual_low_charge_forces_survival() {
+    PowerHold why = POWER_HOLD_NONE;
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_NORMAL, POWER_NORMAL, false, 10, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_LOW, why);
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_ECO, POWER_ECO, false, 15, true, 15, 5, &why));
+}
+
+// Без банки (питание от USB) вето не применяется: процентов просто нет
+void test_power_manual_ignores_invalid_battery() {
+    PowerHold why = POWER_HOLD_STOPWATCH;
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,
+        powerManualMode(POWER_NORMAL, POWER_NORMAL, false, 0, false, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_NONE, why);
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_SURVIVAL, POWER_SURVIVAL, false, 0, false, 15, 5, &why));
+}
+
+// Гистерезис считается от рабочего уровня, а не от выбранного. Зафиксированный
+// обычный режим, опущенный в выживание на 15 %, не должен всплывать на 16-ти:
+// сглаженное напряжение гуляет, и радио включалось бы и выключалось по кругу.
+void test_power_manual_hysteresis_follows_current_mode() {
+    PowerHold why = POWER_HOLD_NONE;
+    // cur=survival (опустили по заряду), chosen=normal — держим до порога+запас
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_SURVIVAL, POWER_NORMAL, false, 16, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_LOW, why);
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_SURVIVAL, POWER_NORMAL, false, 19, true, 15, 5, &why));
+    // 20 % — запас выбран, выбор возвращается
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,
+        powerManualMode(POWER_SURVIVAL, POWER_NORMAL, false, 20, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_NONE, why);
+}
+
+// Выпустив из выживания зарядом, обратно не заводим на первом же дрейфе вниз:
+// вернуться туда можно только через сам порог, а не через его окрестность
+void test_power_manual_release_is_sticky() {
+    PowerHold why = POWER_HOLD_NONE;
+    TEST_ASSERT_EQUAL_INT(POWER_ECO,
+        powerManualMode(POWER_ECO, POWER_SURVIVAL, false, 19, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_CHARGED, why);
+    // А вот ниже порога выбор снова в силе — он и был про исход заряда
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL,
+        powerManualMode(POWER_ECO, POWER_SURVIVAL, false, 15, true, 15, 5, &why));
+    TEST_ASSERT_EQUAL_INT(POWER_HOLD_NONE, why);
+}
+
+// Причина уходит наружу строкой — дашборду нечем иначе объяснить несовпадение
+void test_power_hold_names() {
+    TEST_ASSERT_EQUAL_STRING("",          powerHoldName(POWER_HOLD_NONE));
+    TEST_ASSERT_EQUAL_STRING("stopwatch", powerHoldName(POWER_HOLD_STOPWATCH));
+    TEST_ASSERT_EQUAL_STRING("low",       powerHoldName(POWER_HOLD_LOW));
+    TEST_ASSERT_EQUAL_STRING("charged",   powerHoldName(POWER_HOLD_CHARGED));
+}
+
+// why не обязателен — вызов без него должен собираться и считать так же
+void test_power_manual_without_reason_out() {
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,
+        powerManualMode(POWER_ECO, POWER_ECO, true, 80, true, 15, 5));
 }
 
 // Экран под замером горит в любой час: профиль «обычный» окна не знает
 void test_power_screen_on_at_night_while_stopwatch_runs() {
-    PowerMode m = powerEffectiveMode(POWER_ECO, true);
+    PowerMode m = powerManualMode(POWER_ECO, POWER_ECO, true, 80, true, 15, 5);
     TEST_ASSERT_TRUE(powerScreenAllowed(m, 3, 6, 22));    // 03:00, ночь
     TEST_ASSERT_TRUE(powerScreenAllowed(m, 23, 6, 22));   // 23:00
     // Без замера тот же час экран гасит — правило именно про замер
-    TEST_ASSERT_FALSE(powerScreenAllowed(powerEffectiveMode(POWER_ECO, false),
-                                         3, 6, 22));
+    TEST_ASSERT_FALSE(powerScreenAllowed(
+        powerManualMode(POWER_ECO, POWER_ECO, false, 80, true, 15, 5), 3, 6, 22));
 }
 
 void test_power_mode_from_name() {
@@ -1107,9 +1197,16 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_screen_ignores_critical_without_battery);
     RUN_TEST(test_power_screen_battery_gate_needs_no_hour);
     RUN_TEST(test_power_screen_critical_and_schedule_combine);
-    RUN_TEST(test_power_effective_mode_stopwatch_beats_manual_eco);
-    RUN_TEST(test_power_effective_mode_restores_choice);
-    RUN_TEST(test_power_effective_mode_normal_is_not_pinned);
+    RUN_TEST(test_power_manual_stopwatch_beats_choice);
+    RUN_TEST(test_power_manual_restores_choice);
+    RUN_TEST(test_power_manual_survival_released_by_charge);
+    RUN_TEST(test_power_manual_survival_holds_inside_hysteresis);
+    RUN_TEST(test_power_manual_low_charge_forces_survival);
+    RUN_TEST(test_power_manual_ignores_invalid_battery);
+    RUN_TEST(test_power_manual_hysteresis_follows_current_mode);
+    RUN_TEST(test_power_manual_release_is_sticky);
+    RUN_TEST(test_power_hold_names);
+    RUN_TEST(test_power_manual_without_reason_out);
     RUN_TEST(test_power_screen_on_at_night_while_stopwatch_runs);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);

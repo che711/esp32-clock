@@ -117,6 +117,7 @@ static void buildJson(char* buf, size_t sz) {
         "\"power_auto\":%s,"
         "\"power_chosen\":\"%s\","
         "\"power_pinned\":%s,"
+        "\"power_hold\":\"%s\","
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -153,7 +154,8 @@ static void buildJson(char* buf, size_t sz) {
         powerModeName(),
         powerIsAuto() ? "true" : "false",
         powerProfile(powerChosenMode()).name,
-        powerStopwatchPinned() ? "true" : "false",
+        powerIsHeld() ? "true" : "false",
+        powerHoldReason(),
         (unsigned long)requestCount
     );
 }
@@ -273,16 +275,18 @@ static void handleApiPowerMode() {
         return;
     }
 
-    // mode — что работает сейчас, chosen — что выбрано. Под замером они
-    // расходятся: секундомер держит «обычный» поверх ручного выбора, и
-    // дашборду надо показать принятую команду, а не поднятый уровень.
-    char resp[144];
+    // mode — что работает сейчас, chosen — что выбрано. Они расходятся, когда
+    // выбор поправлен обстоятельством: замер держит обычный режим, низкий
+    // заряд — выживание, поднявшаяся банка из выживания выпускает. hold
+    // называет причину, иначе дашборду нечем объяснить несовпадение.
+    char resp[176];
     snprintf(resp, sizeof(resp),
              "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s,"
-             "\"chosen\":\"%s\",\"pinned\":%s}",
+             "\"chosen\":\"%s\",\"pinned\":%s,\"hold\":\"%s\"}",
              powerModeName(), powerIsAuto() ? "true" : "false",
              powerProfile(powerChosenMode()).name,
-             powerStopwatchPinned() ? "true" : "false");
+             powerIsHeld() ? "true" : "false",
+             powerHoldReason());
     server.send(200, "application/json", resp);
     webApiBroadcast();
 }

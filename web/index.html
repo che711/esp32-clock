@@ -1100,7 +1100,8 @@
   let pmMode    = 'normal';   // что работает прямо сейчас
   let pmChosen  = 'normal';   // что выбрано руками (в авто — то же самое)
   let pmAuto    = true;
-  let pmPinned  = false;      // секундомер держит normal поверх выбора
+  let pmPinned  = false;      // рабочий уровень разошёлся с выбранным
+  let pmHold    = '';         // почему: stopwatch | low | charged
   let pmPending = false;
 
   const PM_HINT = {
@@ -1108,7 +1109,13 @@
     eco:      'Default level. Screen dimmed and off 22:00–06:00, sensor every 2 min, radio sleeps longer.',
     survival: 'Wi-Fi off, screen off 22:00–06:00, clock re-synced once a day. Auto picks this below 15% (3.71 V). Locking it by hand also drops this dashboard — the clock returns to auto after an hour.'
   };
-  const PM_PINNED_HINT = 'Stopwatch is running: the clock is held at normal so the count stays visible, and takes this level back on reset. ';
+  // Почему выбранный уровень сейчас не работает. Без объяснения несовпадение
+  // читается как незалипшая кнопка, а не как «вернём, когда причина отпадёт».
+  const PM_HOLD_HINT = {
+    stopwatch: 'Stopwatch is running: the clock is held at normal so the count stays visible, and takes this level back on reset. ',
+    low:       'Battery is at or below 15%: survival is forced whatever level you pick, otherwise the radio would drain the cell to brownout. Your level comes back once the charge does. ',
+    charged:   'Battery is back above 20%: survival was released, because it also takes this dashboard away and the charge no longer calls for it. Pick eco for a quiet clock on a full cell. '
+  };
 
   function _applyPowerModeUI() {
     // Под замером подсвечиваем выбранный уровень, а не рабочий: команду
@@ -1125,11 +1132,11 @@
     seg.classList.toggle('pinned', pmPinned);
     document.getElementById('pm-auto').checked = pmAuto;
     document.getElementById('pm-label').textContent =
-      pmPinned ? pmChosen + ' · held at normal'
+      pmPinned ? pmChosen + ' · running ' + pmMode
                : pmAuto ? 'auto · ' + pmMode
                         : pmMode;
     document.getElementById('pm-hint').textContent =
-      (pmPinned ? PM_PINNED_HINT : '') + (PM_HINT[shown] || '');
+      (PM_HOLD_HINT[pmHold] || '') + (PM_HINT[shown] || '');
   }
   _applyPowerModeUI();
 
@@ -1149,6 +1156,7 @@
       pmChosen = j.chosen || j.mode;
       pmAuto   = j.auto   === true;
       pmPinned = j.pinned === true;
+      pmHold   = j.hold || '';
       _applyPowerModeUI();
       logEvent('info', note(j));
     })
@@ -1172,7 +1180,7 @@
     pmChosen = mode;
     pmMode   = mode;
     _sendPowerMode('mode=' + mode, j => j.pinned
-      ? 'Power mode ' + j.chosen + ' queued — stopwatch holds normal'
+      ? 'Power mode ' + j.chosen + ' queued — running ' + j.mode + ' (' + j.hold + ')'
       : 'Power mode locked: ' + j.mode);
   }
 
@@ -1430,12 +1438,15 @@
       const auto    = d.power_auto === true;
       const chosen  = d.power_chosen || d.power_mode;
       const pinned  = d.power_pinned === true;
+      const hold    = d.power_hold || '';
       const changed = d.power_mode !== pmMode;
-      if (changed || auto !== pmAuto || chosen !== pmChosen || pinned !== pmPinned) {
+      if (changed || auto !== pmAuto || chosen !== pmChosen ||
+          pinned !== pmPinned || hold !== pmHold) {
         pmMode   = d.power_mode;
         pmChosen = chosen;
         pmAuto   = auto;
         pmPinned = pinned;
+        pmHold   = hold;
         _applyPowerModeUI();
         // Автоматика переключилась сама — это событие, о нём стоит сказать
         if (changed) logEvent(pmMode === 'survival' ? 'warn' : 'info',
