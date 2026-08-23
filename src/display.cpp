@@ -358,7 +358,8 @@ void displayDraw() {
         u8g2.drawHLine(0, 53, 256);
 
         drawBottomStatus(nullptr, true, false);
-        swMsBoxX = -1;                 // на часах поля ".mmm" нет
+        swMsBoxX      = -1;            // на часах поля ".mmm" нет,
+        swLastFull[0] = '\0';          // и сверять следующий кадр не с чем
     }
 
     u8g2.sendBuffer();
@@ -377,7 +378,6 @@ void displayStopwatchFrame() {
     char full[16];
     formatStopwatch(el, full, sizeof(full));
 
-    // >= 1 часа формат "HH:MM:SS" — миллисекунд нет, дробить нечего.
     // От часа формат "HH:MM:SS": миллисекунд в нём нет, дробить нечего — но и
     // гнать полный кадр на каждый вызов незачем. Раньше условие el >= 3600000
     // делало ровно это: значение менялось раз в секунду, а кадр уходил в панель
