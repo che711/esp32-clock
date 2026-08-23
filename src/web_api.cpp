@@ -35,7 +35,13 @@ static const size_t JSON_BUF = 1280;
 //
 // WebServer хранит только заранее заказанные заголовки, иначе
 // server.header("Origin") вернёт пустую строку.
-static const char* COLLECTED_HEADERS[] = { "Origin" };
+// Origin проверяет изменяющие запросы, If-None-Match нужен handleRoot() для
+// ответа 304. Без заказа сюда server.header() вернёт пустую строку.
+static const char* COLLECTED_HEADERS[] = { "Origin", "If-None-Match" };
+
+// У рукопожатия WebSocket свой список: там интересен только Origin, и
+// подмешивать в него заголовки кеширования незачем.
+static const char* WS_HEADERS[] = { "Origin" };
 
 // Пустой Origin — это не браузер (curl, Home Assistant, скрипты): пропускаем.
 // Защищаемся от чужой вкладки, а не от осознанного запроса из консоли.
@@ -112,6 +118,8 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_state\":\"%s\","
         "\"bat_mah\":%d,"
         "\"bat_mah_full\":%d,"
+        "\"bat_warn_pct\":%d,"
+        "\"bat_crit_pct\":%d,"
         "\"bat_low\":%s,"
         "\"power_mode\":\"%s\","
         "\"power_chosen\":\"%s\","
@@ -148,6 +156,12 @@ static void buildJson(char* buf, size_t sz) {
         batteryState(),
         (int)batteryRemainingMah(battery.percent, BATTERY_USABLE_MAH),
         (int)BATTERY_USABLE_MAH,
+        // Пороги едут в снимок, а не зашиты в дашборде: он обязан говорить
+        // ровно то же, что показывают сами часы. Зашитые копии уже разъезжались
+        // с прошивкой — после правки кривой «< 30 %» в UI перестало значить
+        // что-либо. Два лишних числа в секунду дешевле такого расхождения.
+        (int)BATTERY_CRITICAL_PCT,
+        (int)POWER_SCREEN_OFF_PCT,
         battery.low ? "true" : "false",
         powerModeName(),
         powerProfile(powerChosenMode()).name,
@@ -166,6 +180,26 @@ void webApiBroadcast() {
 // ─── HTTP ─────────────────────────────────────────────────
 static void handleRoot() {
     requestCount++;
+
+    // Кеширование. Раньше страница уходила вообще без заголовков на этот счёт,
+    // и браузер по стандарту вправе был держать копию эвристически, сколько
+    // сочтёт нужным. Так и выходило: после перепрошивки устройство раздавало
+    // новый дашборд, а вкладка показывала прошлый, и лечилось это только
+    // Ctrl+Shift+R — про который надо ещё догадаться.
+    //
+    // no-cache здесь не значит «не кешируй»: копию держать можно, но перед
+    // показом обязательно спросить. Спрашивает браузер через ETag, а тот
+    // считается из содержимого страницы при сборке (gen_web_ui.py). Совпал —
+    // отвечаем 304 и не гоняем 26 КБ; не совпал — страница поменялась, и
+    // отдать надо новую.
+    server.sendHeader("Cache-Control", "no-cache");
+    server.sendHeader("ETag", INDEX_HTML_ETAG);
+
+    if (server.header("If-None-Match") == INDEX_HTML_ETAG) {
+        server.send(304, "text/html", "");
+        return;
+    }
+
     // Страница лежит во флеше уже сжатой — распаковывает её браузер.
     // 75 КБ → 17 КБ и по сети, и во флеше.
     server.sendHeader("Content-Encoding", "gzip");
@@ -366,7 +400,7 @@ void webApiBegin() {
     webSocket.onEvent(webSocketEvent);
     // Счётчик обязательных заголовков 0: без Origin (не браузер) пускаем,
     // с чужим Origin — отказ в рукопожатии.
-    webSocket.onValidateHttpHeader(wsValidateHeader, COLLECTED_HEADERS, 0);
+    webSocket.onValidateHttpHeader(wsValidateHeader, WS_HEADERS, 0);
 
     Serial.println("HTTP :80  WS :81");
 }

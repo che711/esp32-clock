@@ -10,6 +10,7 @@
 #  заголовок не трогать: он перезаписывается на каждой сборке.
 # ============================================================
 import gzip
+import hashlib
 import os
 
 Import("env")  # noqa: F821  (SCons подставляет Import в область скрипта)
@@ -30,6 +31,14 @@ def render_header(raw: bytes) -> str:
         rows.append("    " + " ".join("0x%02x," % byte for byte in chunk))
 
     saved = 100 - (len(packed) * 100 // len(raw))
+
+    # ETag страницы — хеш её содержимого. Нужен, чтобы браузер не показывал
+    # старый дашборд после перепрошивки: сервер отдаёт страницу без единого
+    # заголовка кеширования, и браузер в таком случае вправе держать копию
+    # эвристически, сколько сочтёт нужным. Именно так и происходило —
+    # устройство раздавало новый UI, а вкладка показывала прошлый.
+    etag = hashlib.sha256(raw).hexdigest()[:16]
+
     return (
         "// СГЕНЕРИРОВАНО автоматически из web/index.html\n"
         "// (scripts/gen_web_ui.py). Править здесь бессмысленно.\n"
@@ -39,10 +48,12 @@ def render_header(raw: bytes) -> str:
         "\n"
         "// %d байт HTML -> %d байт gzip (-%d%%)\n"
         "#define INDEX_HTML_GZ_LEN %d\n"
+        "// Хеш исходного HTML: меняется вместе со страницей, ходит в ETag\n"
+        "#define INDEX_HTML_ETAG \"\\\"%s\\\"\"\n"
         "\n"
         "const uint8_t INDEX_HTML_GZ[] PROGMEM = {\n"
         "%s\n"
-        "};\n" % (len(raw), len(packed), saved, len(packed), "\n".join(rows))
+        "};\n" % (len(raw), len(packed), saved, len(packed), etag, "\n".join(rows))
     )
 
 
