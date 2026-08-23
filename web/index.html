@@ -1011,9 +1011,23 @@
   const SPARK_MAX  = 300;    // точек в спарклайне (~5 мин при 1 Гц)
   const SAMPLE_MAX = 1000;   // строк в выгрузке CSV/JSON
 
-  function newStat() { return { min: null, max: null, sum: 0, n: 0, hist: [] }; }
-  let stats = { temp: newStat(), press: newStat(), alt: newStat(), trend: newStat(), chip: newStat() };
-  let samples = [];
+  // Счётчики min/avg/max переживают перезагрузку вкладки. Страница висит
+  // открытой сутками, и после случайного F5 суточный минимум температуры
+  // начинался заново с текущей — то есть показывал ровно то же, что и
+  // большое значение над ним. В localStorage уезжают только сами счётчики:
+  // история спарклайнов и строки выгрузки — это сотни точек на ряд, им место
+  // в памяти вкладки.
+  const STATS_KEY     = 'stats:v1';
+  const STATS_SAVE_MS = 5000;   // запись синхронная, чаще раза в 5 с ни к чему
+
+  function newStat()  { return { min: null, max: null, sum: 0, n: 0, hist: [] }; }
+  function newStats() { return { temp: newStat(), press: newStat(), alt: newStat(),
+                                 trend: newStat(), chip: newStat() }; }
+
+  let stats       = newStats();
+  let samples     = [];
+  let statsSince  = Date.now();       // с какого момента копятся счётчики
+  const STAT_KEYS = Object.keys(stats);
 
   function pushStat(s, v) {
     if (v === null || v === undefined || isNaN(v)) return;
@@ -1025,15 +1039,98 @@
   }
   function avg(s) { return s.n ? s.sum / s.n : null; }
 
+  // ── Счётчики в localStorage ──────────────────────────
+  function finite(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
+  function edge(a, b, pick) { return a === null ? b : b === null ? a : pick(a, b); }
+
+  function readStats() {
+    try {
+      const o = JSON.parse(localStorage.getItem(STATS_KEY) || 'null');
+      return (o && typeof o === 'object') ? o : null;
+    } catch (e) { return null; }   // приватный режим или чужой мусор по ключу
+  }
+
+  // Возвращает true, если что-то восстановили: цифры на карточках окажутся
+  // старше открытой вкладки, и это стоит отметить в логе.
+  function restoreStats() {
+    const o = readStats();
+    if (!o) return false;
+    statsSince = finite(o.since) || statsSince;
+    let any = false;
+    STAT_KEYS.forEach(function(k) {
+      const src = o[k], dst = stats[k];
+      if (!src || typeof src !== 'object') return;
+      dst.min = finite(src.min);
+      dst.max = finite(src.max);
+      dst.n   = Math.max(0, Math.round(finite(src.n) || 0));
+      // Сумма без счёта — мусор: avg по ней даст деление на ноль.
+      dst.sum = dst.n ? (finite(src.sum) || 0) : 0;
+      if (dst.n || dst.min !== null) any = true;
+    });
+    return any;
+  }
+
+  let statsSavedAt = 0;
+  function saveStats(force) {
+    const now = Date.now();
+    if (!force && now - statsSavedAt < STATS_SAVE_MS) return;
+    statsSavedAt = now;
+    // Соседняя вкладка копит те же цифры и пишет по тому же ключу. Сливаем:
+    // min/max — крайние из двух, сумму со счётом берём у того, кто видел
+    // больше отсчётов. Складывать суммы нельзя, поток обеим вкладкам идёт
+    // один и тот же, среднее уехало бы вдвое.
+    const o   = readStats() || {};
+    const out = { v: 1, since: Math.min(statsSince, finite(o.since) || statsSince) };
+    STAT_KEYS.forEach(function(k) {
+      const a  = stats[k];
+      const b  = (o[k] && typeof o[k] === 'object') ? o[k] : {};
+      const bn = Math.max(0, Math.round(finite(b.n) || 0));
+      out[k] = {
+        min: edge(a.min, finite(b.min), Math.min),
+        max: edge(a.max, finite(b.max), Math.max),
+        sum: bn > a.n ? (finite(b.sum) || 0) : a.sum,
+        n:   Math.max(a.n, bn)
+      };
+    });
+    try { localStorage.setItem(STATS_KEY, JSON.stringify(out)); } catch (e) {}
+  }
+
+  // Вкладку закрывают и прячут чаще, чем раз в STATS_SAVE_MS, — досохраняем.
+  // pagehide вместо beforeunload: на мобильных вкладка уходит в фон, минуя его.
+  window.addEventListener('pagehide', function() { saveStats(true); });
+  document.addEventListener('visibilitychange', function() { if (document.hidden) saveStats(true); });
+
+  // Сброс в соседней вкладке — ключ исчез. Без этого наша копия при следующем
+  // сохранении вернула бы стёртые цифры обратно, и кнопка Reset выглядела бы
+  // сломанной: нажали в одной вкладке, через пять секунд минимум снова старый.
+  window.addEventListener('storage', function(e) {
+    if (e.key !== STATS_KEY || e.newValue !== null) return;
+    stats      = newStats();
+    statsSince = Date.now();
+    if (lastD) { ingest(lastD); render(lastD); }
+  });
+
   function resetStats() {
-    stats = { temp: newStat(), press: newStat(), alt: newStat(), trend: newStat(), chip: newStat() };
-    samples = [];
+    stats        = newStats();
+    samples      = [];
+    statsSince   = Date.now();
+    statsSavedAt = 0;
+    try { localStorage.removeItem(STATS_KEY); } catch (e) {}
     ['spark-temp-box','spark-press-box','spark-alt-box','spark-fc-box'].forEach(function(id) {
       document.getElementById(id).innerHTML = '<div class="spark-empty">collecting…</div>';
     });
     if (lastD) { ingest(lastD); render(lastD); }
     logEvent('info', 'Min/avg/max counters reset');
     showToast('Min/max reset');
+  }
+
+  if (restoreStats()) {
+    // logEvent и его счётчик строк объявлены ниже по файлу: до конца разбора
+    // скрипта они в TDZ, и прямой вызов отсюда упал бы с ReferenceError.
+    setTimeout(function() {
+      logEvent('info', 'Min/avg/max restored — collecting since ' +
+                       new Date(statsSince).toLocaleString());
+    }, 0);
   }
 
   // ── Спарклайн (inline SVG, без внешних библиотек) ─────
@@ -1350,6 +1447,8 @@
     const chip = parseFloat(d.temp);
     if (!isNaN(chip)) pushStat(stats.chip, chip);
 
+    saveStats(false);   // сама решит, не рано ли писать (STATS_SAVE_MS)
+
     samples.push({
       time: d.time,
       uptime: d.uptime,
@@ -1620,6 +1719,7 @@
     const out = {
       exported_at: deviceTime,
       host: location.hostname,
+      stats_since: new Date(statsSince).toISOString(),
       stats: {
         temp:  { min: stats.temp.min,  avg: avg(stats.temp),  max: stats.temp.max,  unit: 'C' },
         press: { min: stats.press.min, avg: avg(stats.press), max: stats.press.max, unit: 'hPa' },
