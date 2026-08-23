@@ -95,6 +95,10 @@ void displaySetPower(bool on) {
     // неотличима от выключенной. А в ручном режиме поправить уровень некому —
     // displayAutoForHour() выходит сразу, — и экран так и оставался «включённым»
     // и чёрным одновременно.
+    //
+    // Метка «Manual» здесь не догадка: нулевой уровень ставит только
+    // displaySetManualPct(0) — авто-яркость клампится единицей, — а значит
+    // manualBrightness к этому моменту уже true.
     if (on && currentLevel == 0) applyLevel(CONTRAST_MIN_VISIBLE, "Manual");
     else                         refreshPanel();
     Serial.printf("Display -> %s\n", panelLit() ? "ON" : "OFF");

@@ -310,6 +310,10 @@ pio run -t upload --upload-port /dev/ttyACM0
 | POST | `/api/powermode` | `mode=normal\|eco\|survival` или `auto=1` |
 | POST | `/api/reboot` | Перезагрузка |
 
+Булевы параметры (`on`, `auto`) признают истиной только `1`, `true`, `on`, `yes`
+— регистр не важен. Всё прочее, включая пустое значение, читается как ложь.
+Раньше проверка была «всё, кроме строки `0`», и `on=false` включало экран.
+
 ```bash
 curl --compressed http://clock.local/
 curl http://clock.local/api/stats

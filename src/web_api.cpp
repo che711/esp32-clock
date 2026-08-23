@@ -38,6 +38,14 @@ static bool originAccepted() {
     return originIsLocalDevice(origin.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
 }
 
+// Булев параметр запроса. Раньше на месте вызовов стояло `arg(...) != "0"`,
+// то есть истиной считалось всё, кроме строки "0": и "false", и "off", и просто
+// пустое значение включали экран. Признаём истинными только явные написания.
+static bool argIsTrue(const String& v) {
+    return v == "1" || v.equalsIgnoreCase("true")
+        || v.equalsIgnoreCase("on") || v.equalsIgnoreCase("yes");
+}
+
 static void sendForeignOrigin() {
     server.send(403, "application/json", "{\"error\":\"foreign origin\"}");
 }
@@ -189,7 +197,7 @@ static void handleApiWeather() {
 static void handleApiBrightness() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
-    if (server.hasArg("auto")) {
+    if (server.hasArg("auto") && argIsTrue(server.arg("auto"))) {
         displaySetAuto();
         server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
         applyAutoBrightness();       // сразу применяем авто-уровень
@@ -213,7 +221,7 @@ static void handleApiPower() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
     if (server.hasArg("on")) {
-        bool on = server.arg("on") != "0";
+        bool on = argIsTrue(server.arg("on"));
         screenSetPower(on);      // не displaySetPower: ночью включаем с таймером
         char resp[48];
         snprintf(resp, sizeof(resp),
@@ -231,7 +239,7 @@ static void handleApiPowerMode() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
 
-    if (server.hasArg("auto") && server.arg("auto") != "0") {
+    if (server.hasArg("auto") && argIsTrue(server.arg("auto"))) {
         powerSetAuto();
     } else if (server.hasArg("mode")) {
         PowerMode m;

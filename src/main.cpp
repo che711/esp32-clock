@@ -193,6 +193,7 @@ void swStart() {
 
 void swPause() {
     if (stopwatch.pause(millis())) {
+        forceRedraw = true;             // маркер «II» — сразу, а не со сменой секунды
         setRadioSaving(true);           // счётчик заморожен, точность больше не нужна
         Serial.println("Stopwatch PAUSE");
     }
@@ -406,12 +407,15 @@ static void updateWeather() {
     if (now - lastSensorMs >= powerSensorIntervalMs()) {
         lastSensorMs = now;
         weather = sensorRead();
-        if (!weather.valid) {
-            ledColor(4, 0, 0);                   // красный — ошибка датчика
-            ledBlinking = false;                 // горит ровно, не мигок
-        } else if (!powerLedEnabled()) {
+        // Профиль спрашиваем первым: в экономе индикация молчит вся, включая
+        // аварийную. Раньше «датчик умер» стояло выше — и красный горел РОВНО,
+        // то есть непрерывно, именно в режимах, заведённых ради экономии.
+        if (!powerLedEnabled()) {
             ledColor(0, 0, 0);                   // в экономе индикация молчит
             ledBlinking = false;
+        } else if (!weather.valid) {
+            ledColor(4, 0, 0);                   // красный — ошибка датчика
+            ledBlinking = false;                 // горит ровно, не мигок
         } else if (battery.valid && battery.low) {
             ledBlink(6, 3, 0);                   // жёлтый — АКБ разряжена
         } else {
