@@ -114,10 +114,8 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_mah_full\":%d,"
         "\"bat_low\":%s,"
         "\"power_mode\":\"%s\","
-        "\"power_auto\":%s,"
         "\"power_chosen\":\"%s\","
         "\"power_pinned\":%s,"
-        "\"power_hold\":\"%s\","
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -152,10 +150,8 @@ static void buildJson(char* buf, size_t sz) {
         (int)BATTERY_USABLE_MAH,
         battery.low ? "true" : "false",
         powerModeName(),
-        powerIsAuto() ? "true" : "false",
         powerProfile(powerChosenMode()).name,
         powerIsHeld() ? "true" : "false",
-        powerHoldReason(),
         (unsigned long)requestCount
     );
 }
@@ -255,38 +251,31 @@ static void handleApiPower() {
     server.send(400, "application/json", "{\"error\":\"missing on param\"}");
 }
 
-// Режим энергосбережения: mode=normal|eco|survival фиксирует уровень,
-// auto=1 возвращает автоматику по заряду.
+// Уровень энергосбережения: mode=normal|eco.
 static void handleApiPowerMode() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
 
-    if (server.hasArg("auto") && argIsTrue(server.arg("auto"))) {
-        powerSetAuto();
-    } else if (server.hasArg("mode")) {
-        PowerMode m;
-        if (!powerModeFromName(server.arg("mode").c_str(), &m)) {
-            server.send(400, "application/json", "{\"error\":\"bad mode\"}");
-            return;
-        }
-        powerSetMode(m);
-    } else {
-        server.send(400, "application/json", "{\"error\":\"missing mode or auto\"}");
+    if (!server.hasArg("mode")) {
+        server.send(400, "application/json", "{\"error\":\"missing mode\"}");
         return;
     }
+    PowerMode m;
+    if (!powerModeFromName(server.arg("mode").c_str(), &m)) {
+        server.send(400, "application/json", "{\"error\":\"bad mode\"}");
+        return;
+    }
+    powerSetMode(m);
 
-    // mode — что работает сейчас, chosen — что выбрано. Они расходятся, когда
-    // выбор поправлен обстоятельством: замер держит обычный режим, низкий
-    // заряд — выживание, поднявшаяся банка из выживания выпускает. hold
-    // называет причину, иначе дашборду нечем объяснить несовпадение.
-    char resp[176];
+    // mode — что работает сейчас, chosen — что выбрано. Расходятся они на
+    // время замера: секундомер держит обычный уровень, а выбор ждёт сброса.
+    // Дашборду надо показать принятую команду, а не поднятый уровень.
+    char resp[144];
     snprintf(resp, sizeof(resp),
-             "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s,"
-             "\"chosen\":\"%s\",\"pinned\":%s,\"hold\":\"%s\"}",
-             powerModeName(), powerIsAuto() ? "true" : "false",
+             "{\"ok\":true,\"mode\":\"%s\",\"chosen\":\"%s\",\"pinned\":%s}",
+             powerModeName(),
              powerProfile(powerChosenMode()).name,
-             powerIsHeld() ? "true" : "false",
-             powerHoldReason());
+             powerIsHeld() ? "true" : "false");
     server.send(200, "application/json", resp);
     webApiBroadcast();
 }

@@ -16,8 +16,8 @@
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
                  Menlo, Consolas, 'Liberation Mono', monospace;
 
-    --bg:          #0a0f18;
-    --bg-2:        #101a2c;
+    --bg:          #080b16;
+    --bg-2:        #17163a;
     --surface:     #141c2b;
     --surface-2:   #0f1725;
     --surface-3:   #1a2334;
@@ -36,40 +36,76 @@
     --track:       #1c2537;
     --code:        #9dbdff;
     --shadow:      0 20px 50px rgba(0,0,0,0.45);
+    --card-shadow: 0 16px 34px rgba(0,0,0,0.42);
 
     /* Акцентные цвета метрик (полоска сверху карточки + график) */
     --c-temp:  #f0a45c;  --c-temp2:  #f7c88f;  --c-temp-soft:  rgba(240,164,92,0.13);
     --c-press: #6b9bff;  --c-press2: #9dc0ff;  --c-press-soft: rgba(107,155,255,0.13);
     --c-alt:   #ef7a5c;  --c-alt2:   #f8a98f;  --c-alt-soft:   rgba(239,122,92,0.13);
     --c-fc:    #5cc389;  --c-fc2:    #8fdcb1;  --c-fc-soft:    rgba(92,195,137,0.13);
+
+    /* Заливка плашки метрики: концы градиента. Отдельно от --c-*, потому что
+       те — акцент (иконка, единица, среднее), а этими залит весь фон, и брать
+       для заливки акцентный тон нельзя: на нём не прочитать ни белый текст,
+       ни сам акцент. В тёмной теме заливка глубокая — карточка должна читаться
+       как цветной объект, а не светить в глаза ночью. */
+    --g-temp:  #6d3d18;  --g-temp2:  #b57431;
+    --g-press: #1e3468;  --g-press2: #3a63b8;
+    --g-alt:   #6b2a3c;  --g-alt2:   #b04f66;
+    --g-fc:    #174c38;  --g-fc2:    #2f875f;
+    --g-clock: #1d2450;  --g-clock2: #3c4a93;
+
+    /* Цвет линии спарклайна. Отдельно от цвета метрики: плашка залита, и
+       акцентный тон на ней пропал бы. В обеих темах линия белая, разная
+       только прозрачность. */
+    --s-line: rgba(255,255,255,0.86);
   }
 
+  /* ── Светлая тема ────────────────────────────────────────
+     Не «дневная версия тёмной», а другая раскладка контраста.
+     Фон страницы — насыщенный сиреневый, метрики на нём цветные
+     плашки с белым текстом, а служебные панели наоборот светлые.
+     Так карточка с числом читается как объект на столе, а не как
+     прямоугольник чуть светлее фона: контраст несёт цвет, а не
+     обводка, и обводки поэтому нет вовсе.                      */
   [data-theme="light"] {
-    --bg:          #eef2f8;
-    --bg-2:        #e2eaf6;
-    --surface:     #ffffff;
-    --surface-2:   #f3f6fb;
-    --surface-3:   #eaeff7;
-    --line:        #dbe3ef;
-    --line-soft:   #e6ecf5;
-    --text:        #15202f;
-    --text-dim:    #5a6a80;
-    --text-faint:  #8798ae;
-    --accent:      #2f66d8;
-    --accent-2:    #1d4fbd;
-    --accent-soft: rgba(47,102,216,0.11);
-    --good:        #21955f;
-    --warn:        #b4761b;
-    --crit:        #cf4b34;
-    --info:        #2f66d8;
-    --track:       #e2e8f2;
-    --code:        #2b52a8;
-    --shadow:      0 14px 34px rgba(30,50,90,0.10);
+    --bg:          #6f6ade;
+    --bg-2:        #8d7bea;
+    --surface:     #f6f5fc;   /* служебные панели */
+    --surface-2:   #eeecf8;   /* плитки внутри них */
+    --surface-3:   #e6e3f4;
+    --line:        transparent;
+    --line-soft:   #e3e0f2;
+    --text:        #1d1b3a;
+    --text-dim:    #5d5a82;
+    --text-faint:  #8a87a8;
+    --accent:      #6a5fd8;
+    --accent-2:    #8f83ef;
+    --accent-soft: rgba(106,95,216,0.12);
+    --good:        #1e9e6a;
+    --warn:        #c07b12;
+    --crit:        #d9483a;
+    --info:        #4f6ae0;
+    --track:       #ded9f0;
+    --code:        #4b3fb0;
+    --shadow:      0 18px 42px rgba(60,45,140,0.16);
+    --card-shadow: 0 14px 32px rgba(60,45,140,0.22);
 
-    --c-temp:  #cb7a20;  --c-temp2:  #e09a45;  --c-temp-soft:  rgba(203,122,32,0.11);
-    --c-press: #2f66d8;  --c-press2: #5b8cf0;  --c-press-soft: rgba(47,102,216,0.11);
-    --c-alt:   #d1502f;  --c-alt2:   #e87b5b;  --c-alt-soft:   rgba(209,80,47,0.11);
-    --c-fc:    #21955f;  --c-fc2:    #46b681;  --c-fc-soft:    rgba(33,149,95,0.11);
+    /* Плашки метрик: заливка целиком, поэтому пары — концы градиента */
+    --c-temp:  #8b7ae8;  --c-temp2:  #b3a6f2;  --c-temp-soft:  rgba(139,122,232,0.16);
+    --c-press: #35b3dd;  --c-press2: #3fd2c4;  --c-press-soft: rgba(53,179,221,0.16);
+    --c-alt:   #f0617e;  --c-alt2:   #f79fb0;  --c-alt-soft:   rgba(240,97,126,0.16);
+    --c-fc:    #f3a337;  --c-fc2:    #f8d449;  --c-fc-soft:    rgba(243,163,55,0.16);
+
+    /* В светлой теме заливка и есть акцентный цвет — он там достаточно
+       светлый, чтобы белый текст на нём читался. */
+    --g-temp:  var(--c-temp);   --g-temp2:  var(--c-temp2);
+    --g-press: var(--c-press);  --g-press2: var(--c-press2);
+    --g-alt:   var(--c-alt);    --g-alt2:   var(--c-alt2);
+    --g-fc:    var(--c-fc);     --g-fc2:    var(--c-fc2);
+    --g-clock: #5f57cf;         --g-clock2: #8a7bec;
+
+    --s-line: rgba(255,255,255,0.92);
   }
 
   body {
@@ -89,6 +125,42 @@
     width: min(940px, 100%);
     display: flex; flex-direction: column; gap: 14px;
   }
+
+  /* ── Светлая тема: то, что отличается ────────────────────
+     Оформление залитых плашек общее для обеих тем (см. «Плашки
+     метрик» ниже), здесь остаётся только то, что светлая тема
+     делает иначе: фон страницы и служебные панели.            */
+
+  /* Фон сплошной сиреневый, без радиального подмеса: под цветными
+     плашками градиент фона всё равно не читается, а на краях давал
+     грязный переход. */
+  [data-theme="light"] body {
+    background: linear-gradient(160deg, var(--bg) 0%, var(--bg-2) 100%);
+    background-attachment: fixed;
+  }
+
+  /* Шапка лежит прямо на цветном фоне — значит светлая */
+  [data-theme="light"] .app-title      { color: rgba(255,255,255,0.72); }
+  [data-theme="light"] .app-title b    { color: #fff; }
+  [data-theme="light"] .host-chip      { color: #fff; background: rgba(255,255,255,0.18);
+                                         border-color: rgba(255,255,255,0.26); }
+  [data-theme="light"] .theme-btn      { background: rgba(255,255,255,0.18);
+                                         border-color: rgba(255,255,255,0.28); color: #fff; }
+  [data-theme="light"] .theme-btn:hover{ border-color: #fff; }
+
+  /* Служебные панели наоборот светлые: на них смотрят, а не любуются */
+  [data-theme="light"] .card:not(.metric-card):not(.clock-card) {
+    border-color: transparent; border-radius: 18px;
+    box-shadow: 0 10px 26px rgba(60,45,140,0.12);
+  }
+  [data-theme="light"] .tile,
+  [data-theme="light"] .bright-block { border-color: transparent; }
+  [data-theme="light"] .btn-action,
+  [data-theme="light"] .sw-btn {
+    background: var(--surface-2); border-color: transparent; border-radius: 10px;
+  }
+  [data-theme="light"] .btn-action:hover:not(:disabled),
+  [data-theme="light"] .sw-btn:hover:not(:disabled) { background: var(--surface-3); }
 
   /* ── Порядок блоков ── */
   .app-header { order: 0; }
@@ -117,7 +189,10 @@
   .wrap > *:nth-child(4){animation-delay:.09s} .wrap > *:nth-child(5){animation-delay:.12s}
   .wrap > *:nth-child(6){animation-delay:.15s} .wrap > *:nth-child(7){animation-delay:.18s}
 
-  /* Цветная полоска сверху */
+  /* Цветная полоска сверху и подсвет под ней. Достались карточкам, которые
+     остались поверхностями, — сейчас это только секундомер. Залитым плашкам
+     они не нужны: там цвет и так весь фон, а полоска поверх градиента читалась
+     бы как случайная линия. */
   .card.accented::before {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
     background: linear-gradient(90deg, var(--c), var(--c2));
@@ -127,6 +202,65 @@
     background: radial-gradient(520px 130px at 22% -30%, var(--c-soft), transparent 70%);
     pointer-events: none;
   }
+  .metric-card.accented::before, .metric-card.accented::after,
+  .clock-card.accented::before,  .clock-card.accented::after { display: none; }
+
+  /* ── Залитые плашки: метрики и часы ──────────────────────
+     Обе темы, разные только концы градиента (--g*). Карточка с числом должна
+     читаться как предмет, а не как прямоугольник чуть светлее фона: контраст
+     несёт цвет, поэтому обводки нет вовсе, а текст внутри — белый с разной
+     прозрачностью. Серые оттенки на цветной заливке грязнят, поэтому своих
+     цветов у надписей внутри нет ни одного.                                */
+  .metric-card, .clock-card {
+    background: linear-gradient(145deg, var(--g) 0%, var(--g2) 100%);
+    border-color: transparent;
+    border-radius: 20px;
+    color: #fff;
+    box-shadow: var(--card-shadow);
+  }
+  .m-temp  { --g: var(--g-temp);  --g2: var(--g-temp2);  }
+  .m-press { --g: var(--g-press); --g2: var(--g-press2); }
+  .m-alt   { --g: var(--g-alt);   --g2: var(--g-alt2);   }
+  .m-fc    { --g: var(--g-fc);    --g2: var(--g-fc2);    }
+  .clock-card { --g: var(--g-clock); --g2: var(--g-clock2); }
+
+  .metric-card .m-title, .metric-card .spark-label,
+  .clock-card .eyebrow                 { color: rgba(255,255,255,0.76); }
+  .metric-card .m-value, .clock-card #time { color: #fff; }
+  .metric-card .m-unit                 { color: rgba(255,255,255,0.82); }
+  .metric-card .m-desc                 { color: rgba(255,255,255,0.85); }
+  .metric-card .m-icon                 { filter: brightness(0) invert(1); opacity: 0.9; }
+
+  /* min/avg/max, пилюля статуса и переключатель °C/°F — «стекло» на заливке */
+  .metric-card .mmm, .metric-card .pill {
+    background: rgba(255,255,255,0.16);
+    border-color: rgba(255,255,255,0.22);
+  }
+  .metric-card .mmm-key            { color: rgba(255,255,255,0.72); }
+  .metric-card .mmm-val,
+  .metric-card .mmm-val.avg        { color: #fff; }
+  .metric-card .pill               { color: #fff; }
+  .metric-card .pill .pill-dot     { background: rgba(255,255,255,0.9); }
+  .metric-card .unit-lbl           { color: rgba(255,255,255,0.8); }
+  .metric-card .switch             { background: rgba(255,255,255,0.22);
+                                     border-color: rgba(255,255,255,0.3); }
+  .metric-card .switch .knob       { background: #fff; }
+  .metric-card .switch.on          { background: rgba(255,255,255,0.4);
+                                     border-color: rgba(255,255,255,0.5); }
+
+  /* График без своей подложки: линию видно и так, а прямоугольник разрезал бы
+     заливку пополам. Отделяем его тонкой чертой, а не сменой фона. */
+  .metric-card .spark, .metric-card .spark-empty { background: transparent; }
+  .metric-card .spark-empty { color: rgba(255,255,255,0.6); }
+  .metric-card .spark-wrap  { border-top: 1px solid rgba(255,255,255,0.22);
+                              padding-top: 11px; }
+
+  /* Часы: секундная полоска и подписи под ней на том же стекле */
+  .clock-card .sec-track { background: rgba(255,255,255,0.18); }
+  .clock-card #sec-bar   { background: rgba(255,255,255,0.85); }
+  .clock-card #date      { color: rgba(255,255,255,0.86); }
+  .clock-card #day       { color: rgba(255,255,255,0.62); }
+  .clock-card .meta-dot  { background: rgba(255,255,255,0.7); }
 
   /* ── Шапка ── */
   .app-header { display: flex; align-items: center; justify-content: space-between;
@@ -304,34 +438,7 @@
   .mode-btn.active { background: var(--accent); color: #fff; pointer-events: none; }
   .mode-btn:not(.active):hover { color: var(--text-dim); }
 
-  /* Авто — политика, а не уровень: отдельный тумблер, чтобы не читалось
-     как четвёртый режим в одном ряду с тремя настоящими. */
-  .pm-switch { display: flex; align-items: center; gap: 8px; cursor: pointer;
-               user-select: none; -webkit-user-select: none; }
-  .pm-switch input { position: absolute; opacity: 0; pointer-events: none; }
-  .pm-track { width: 34px; height: 19px; border-radius: 999px; flex-shrink: 0;
-              background: var(--surface-3); border: 1px solid var(--line-soft);
-              position: relative; transition: background 0.18s, border-color 0.18s; }
-  .pm-track::after { content: ''; position: absolute; top: 2px; left: 2px;
-                     width: 13px; height: 13px; border-radius: 50%;
-                     background: var(--text-faint);
-                     transition: transform 0.18s, background 0.18s; }
-  .pm-switch input:checked + .pm-track { background: var(--accent); border-color: var(--accent); }
-  .pm-switch input:checked + .pm-track::after { transform: translateX(15px); background: #fff; }
-  .pm-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.8px;
-            text-transform: uppercase; color: var(--text-faint); transition: color 0.18s; }
-  .pm-switch input:checked ~ .pm-lbl { color: var(--accent); }
-  .pm-switch input:focus-visible + .pm-track { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-  /* Пока выбирает автоматика, сегмент приглушён — но не заблокирован: щелчок
-     по уровню и есть команда «зафиксировать этот». Подсвеченный уровень тоже
-     кликабелен (общее правило .mode-btn.active его гасит), иначе закрепить
-     ровно то, что автоматика выбрала сейчас, было бы нечем. */
-  .seg.locked { opacity: 0.62; }
-  .seg.locked .mode-btn { cursor: pointer; }
-  .seg.locked .mode-btn.active { pointer-events: auto; }
-  .seg.locked:hover { opacity: 0.85; }
-  /* Режим держит секундомер: выбор принят, но отложен до сброса замера */
+  /* Уровень держит секундомер: выбор принят, но отложен до сброса замера */
   .seg.pinned { opacity: 0.62; }
 
   .slider-row { display: flex; align-items: center; gap: 12px; }
@@ -693,17 +800,10 @@
           <div class="tile-label">Power saving</div>
           <span class="level-chip" id="pm-label">—</span>
         </div>
-        <label class="pm-switch"
-               title="Let the charge pick the level. Clicking a level below locks it and turns this off.">
-          <input type="checkbox" id="pm-auto" checked onchange="setPowerAuto(this.checked)">
-          <span class="pm-track"></span>
-          <span class="pm-lbl">By charge</span>
-        </label>
-      </div>
-      <div class="seg locked" id="pm-seg">
-        <button class="mode-btn" id="pm-normal"   onclick="setPowerMode('normal')">Normal</button>
-        <button class="mode-btn" id="pm-eco"      onclick="setPowerMode('eco')">Eco</button>
-        <button class="mode-btn" id="pm-survival" onclick="setPowerMode('survival')">Survival</button>
+        <div class="seg" id="pm-seg">
+          <button class="mode-btn" id="pm-normal" onclick="setPowerMode('normal')">Normal</button>
+          <button class="mode-btn" id="pm-eco"    onclick="setPowerMode('eco')">Eco</button>
+        </div>
       </div>
       <div class="tile-sub" id="pm-hint">—</div>
     </div>
@@ -819,6 +919,10 @@
     const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     applyTheme(next);
     localStorage.setItem('theme', next);
+    // Спарклайн — готовый SVG с зашитым в него цветом линии, CSS его уже не
+    // достанет. Без перерисовки линия оставалась бы в цвете прошлой темы до
+    // следующего снимка, то есть до секунды.
+    if (lastD) render(lastD);
   }
 
   document.getElementById('host-chip').textContent = location.hostname || 'clock.local';
@@ -1096,92 +1200,59 @@
     btn.className   = 'btn-action btn-power ' + (on ? 'on' : 'off');
   }
 
-  // ── Режим энергосбережения ───────────────────────────
-  let pmMode    = 'normal';   // что работает прямо сейчас
-  let pmChosen  = 'normal';   // что выбрано руками (в авто — то же самое)
-  let pmAuto    = true;
-  let pmPinned  = false;      // рабочий уровень разошёлся с выбранным
-  let pmHold    = '';         // почему: stopwatch | low | charged
+  // ── Уровень энергосбережения ─────────────────────────
+  let pmMode    = 'eco';      // что работает прямо сейчас
+  let pmChosen  = 'eco';      // что выбрано
+  let pmPinned  = false;      // секундомер держит normal поверх выбора
   let pmPending = false;
 
   const PM_HINT = {
-    normal:   'Screen always on, sensor every 60 s, radio at full power. Auto picks this while the stopwatch runs.',
-    eco:      'Default level. Screen dimmed and off 22:00–06:00, sensor every 2 min, radio sleeps longer.',
-    survival: 'Wi-Fi off, screen off 22:00–06:00, clock re-synced once a day. Auto picks this below 15% (3.71 V). Locking it by hand also drops this dashboard — the clock returns to auto after an hour.'
+    normal: 'Screen always on, sensor every 60 s, radio at full power. The stopwatch switches here on its own and hands the level back on reset.',
+    eco:    'Default level. Screen dimmed and off 22:00\u201306:00, sensor every 2 min, radio sleeps longer between beacons.'
   };
-  // Почему выбранный уровень сейчас не работает. Без объяснения несовпадение
-  // читается как незалипшая кнопка, а не как «вернём, когда причина отпадёт».
-  const PM_HOLD_HINT = {
-    stopwatch: 'Stopwatch is running: the clock is held at normal so the count stays visible, and takes this level back on reset. ',
-    low:       'Battery is at or below 15%: survival is forced whatever level you pick, otherwise the radio would drain the cell to brownout. Your level comes back once the charge does. ',
-    charged:   'Battery is back above 20%: survival was released, because it also takes this dashboard away and the charge no longer calls for it. Pick eco for a quiet clock on a full cell. '
-  };
+  const PM_PINNED_HINT = 'Stopwatch is running: the clock is held at normal so the count stays visible, and takes this level back on reset. ';
 
   function _applyPowerModeUI() {
     // Под замером подсвечиваем выбранный уровень, а не рабочий: команду
     // приняли, она просто ждёт сброса секундомера. Иначе кнопка выглядела бы
     // ненажатой.
     const shown = pmPinned ? pmChosen : pmMode;
-    ['normal', 'eco', 'survival'].forEach(k => {
+    ['normal', 'eco'].forEach(k => {
       document.getElementById('pm-' + k).classList.toggle('active', k === shown);
     });
-    // Пока выбирает автоматика, сегмент приглушён, но нажимается: щелчок по
-    // уровню и есть «зафиксировать этот» — отдельно снимать тумблер не нужно.
-    const seg = document.getElementById('pm-seg');
-    seg.classList.toggle('locked', pmAuto);
-    seg.classList.toggle('pinned', pmPinned);
-    document.getElementById('pm-auto').checked = pmAuto;
+    document.getElementById('pm-seg').classList.toggle('pinned', pmPinned);
     document.getElementById('pm-label').textContent =
-      pmPinned ? pmChosen + ' · running ' + pmMode
-               : pmAuto ? 'auto · ' + pmMode
-                        : pmMode;
+      pmPinned ? pmChosen + ' \u00b7 running ' + pmMode : pmMode;
     document.getElementById('pm-hint').textContent =
-      (PM_HOLD_HINT[pmHold] || '') + (PM_HINT[shown] || '');
+      (pmPinned ? PM_PINNED_HINT : '') + (PM_HINT[shown] || '');
   }
   _applyPowerModeUI();
 
-  // Общая отправка: рисуем выбор сразу, не дожидаясь ответа, — пока запрос
-  // в пути, приходящие по WebSocket снимки не должны отыгрывать его назад.
-  function _sendPowerMode(body, note) {
+  // Рисуем выбор сразу, не дожидаясь ответа: пока запрос в пути, приходящие
+  // по WebSocket снимки не должны отыгрывать его назад.
+  function setPowerMode(mode) {
+    if (mode === pmChosen && !pmPinned) return;
+    pmChosen = mode;
+    pmMode   = mode;
     pmPending = true;
     _applyPowerModeUI();
     fetch('/api/powermode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body
+      body: 'mode=' + mode
     })
     .then(r => r.json())
     .then(j => {
       pmMode   = j.mode;
       pmChosen = j.chosen || j.mode;
-      pmAuto   = j.auto   === true;
       pmPinned = j.pinned === true;
-      pmHold   = j.hold || '';
       _applyPowerModeUI();
-      logEvent('info', note(j));
+      logEvent('info', j.pinned
+        ? 'Power level ' + j.chosen + ' queued \u2014 stopwatch holds normal'
+        : 'Power level: ' + j.mode);
     })
-    .catch(() => logEvent('error', 'Power mode request failed'))
+    .catch(() => logEvent('error', 'Power level request failed'))
     .finally(() => { pmPending = false; });
-  }
-
-  function setPowerAuto(on) {
-    // Выключение тумблера фиксирует то, что автоматика выбрала к этому моменту:
-    // так режим не прыгает под руками в момент переключения. Под замером
-    // «выбрано» — это отложенный уровень, а не поднятый секундомером normal.
-    if (!on) return setPowerMode(pmPinned ? pmChosen : pmMode);
-    pmAuto = true;
-    _sendPowerMode('auto=1', j => 'Power mode: auto (' + j.mode + ')');
-  }
-
-  function setPowerMode(mode) {
-    // Щелчок по уровню сам снимает автоматику — отдельно трогать тумблер не
-    // надо. Он остаётся дорогой обратно, а не воротами внутрь.
-    pmAuto   = false;
-    pmChosen = mode;
-    pmMode   = mode;
-    _sendPowerMode('mode=' + mode, j => j.pinned
-      ? 'Power mode ' + j.chosen + ' queued — running ' + j.mode + ' (' + j.hold + ')'
-      : 'Power mode locked: ' + j.mode);
   }
 
   // ── WebSocket ────────────────────────────────────────
@@ -1358,10 +1429,11 @@
       : d.trend < -0.5 ? 'Pressure falling — weather may turn'
       : 'Barometric change over the last hour';
 
-      drawSpark('spark-temp-box',  stats.temp.hist,  cssVar('--c-temp'),  0.5);
-      drawSpark('spark-press-box', stats.press.hist, cssVar('--c-press'), 1.0);
-      drawSpark('spark-alt-box',   stats.alt.hist,   cssVar('--c-alt'),   5.0);
-      drawSpark('spark-fc-box',    stats.trend.hist, cssVar('--c-fc'),    0.4);
+      const sl = cssVar('--s-line');
+      drawSpark('spark-temp-box',  stats.temp.hist,  sl, 0.5);
+      drawSpark('spark-press-box', stats.press.hist, sl, 1.0);
+      drawSpark('spark-alt-box',   stats.alt.hist,   sl, 5.0);
+      drawSpark('spark-fc-box',    stats.trend.hist, sl, 0.4);
     } else {
       ['mt-val','mt-min','mt-avg','mt-max','mp-val','mp-min','mp-avg','mp-max','ma-val','mf-val']
         .forEach(id => { document.getElementById(id).textContent = '—'; });
@@ -1435,22 +1507,16 @@
     lastScreenPeek = peek;
 
     if (!pmPending && d.power_mode !== undefined) {
-      const auto    = d.power_auto === true;
       const chosen  = d.power_chosen || d.power_mode;
       const pinned  = d.power_pinned === true;
-      const hold    = d.power_hold || '';
       const changed = d.power_mode !== pmMode;
-      if (changed || auto !== pmAuto || chosen !== pmChosen ||
-          pinned !== pmPinned || hold !== pmHold) {
+      if (changed || chosen !== pmChosen || pinned !== pmPinned) {
         pmMode   = d.power_mode;
         pmChosen = chosen;
-        pmAuto   = auto;
         pmPinned = pinned;
-        pmHold   = hold;
         _applyPowerModeUI();
-        // Автоматика переключилась сама — это событие, о нём стоит сказать
-        if (changed) logEvent(pmMode === 'survival' ? 'warn' : 'info',
-                              'Power mode \u2192 ' + pmMode);
+        // Уровень поднялся сам (секундомер) — это событие, о нём стоит сказать
+        if (changed) logEvent('info', 'Power level \u2192 ' + pmMode);
       }
     }
 

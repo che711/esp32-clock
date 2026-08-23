@@ -193,11 +193,20 @@ void screenSetPower(bool on) {
 }
 
 // ─── Секундомер: команды ─────────────────────────────────
-// Экономия радио. MAX_MODEM холоднее MIN, но задерживает доставку пакетов
-// до ~0.9 с — пока идёт отсчёт секундомера, сон выключаем совсем.
+// Экономия радио. MAX_MODEM холоднее всех, но задерживает входящий пакет до
+// ~0.9 с: под секундомером это ощущается — кнопка в браузере откликается
+// с заметным опозданием. Поэтому на время замера сон ужимаем до MIN_MODEM
+// (пробуждение на каждый маячок, ~100 мс), а не выключаем.
+//
+// Раньше здесь стоял setSleep(false), то есть сон снимался совсем, и радио
+// держало приёмник включённым постоянно — около 65 мА на ровном месте.
+// Обосновано это было «точностью отсчёта», но отсчёт идёт по millis() и от
+// сна радио не зависит вовсе: страдала только доставка команд, а её хватает
+// и MIN_MODEM. Вместе с listen_interval = 1 из профиля normal задержка
+// выходит около десятой секунды.
 static void setRadioSaving(bool save) {
-    WiFi.setSleep(save);
-    if (save) esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+    WiFi.setSleep(true);            // сон включён всегда, вопрос только в глубине
+    esp_wifi_set_ps(save ? WIFI_PS_MAX_MODEM : WIFI_PS_MIN_MODEM);
 }
 
 void swStart() {
@@ -338,87 +347,14 @@ static void syncNTP() {
     Serial.println(tries < 20 ? " OK" : " TIMEOUT, retry in background");
 }
 
-// Радио в режиме выживания: выключено, но раз в POWER_NTP_WAKE_MS
-// поднимается на POWER_NTP_WAKE_TIMEOUT_MS ради синхронизации часов.
-// Без этого RTC уезжает: у внутреннего генератора точность порядка
-// нескольких секунд в сутки.
-static bool ntpWaking    = false;
-static bool ntpRequested = false;
-static uint32_t ntpWakeStart = 0;
-
-static void radioOff(const char* why) {
-    if (WiFi.getMode() == WIFI_OFF) return;
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    // Выключение радио отменяет и начатую ассоциацию: держать взведённый
-    // автомат при выключенном передатчике не за чем, а забытый флаг заблокировал
-    // бы следующую попытку подключиться.
-    wifiConnecting = false;
-    wifiReady      = false;
-    localIP        = "";
-    Serial.printf("Power: WiFi off (%s)\n", why);
-}
-
-static void maintainSurvivalRadio(uint32_t now) {
-    if (!ntpWaking) {
-        radioOff("survival");
-        if (now - lastNtpMs >= POWER_NTP_WAKE_MS) {
-            Serial.println("Power: WiFi up for NTP");
-            ntpWaking    = true;
-            ntpRequested = false;
-            ntpWakeStart = now;
-            wifiBeginConnect();
-        }
-        return;
-    }
-
-    // Связь в этом окне поднимается тем же автоматом, что и в обычном режиме,
-    // а не голыми mode()/begin(). Разница в wifiOnConnected(): она ставит
-    // localIP и поднимает mDNS. Без неё устройство эти полминуты было в сети,
-    // но недостижимо — clock.local молчал, дашборд показывал пустой адрес,
-    // а запрос с Origin по IP получал 403, потому что localIP пустой.
-    if (wifiConnecting) {
-        wifiConnectStep(now);
-    } else if (WiFi.status() == WL_CONNECTED && !wifiReady) {
-        wifiOnConnected();                // поднялась мимо автомата
-    }
-
-    if (WiFi.status() == WL_CONNECTED && !ntpRequested) {
-        startNTP();                       // демон сам доведёт запрос до конца
-        ntpRequested = true;
-    }
-    if (now - ntpWakeStart >= POWER_NTP_WAKE_TIMEOUT_MS) {
-        ntpWaking = false;
-        // Отметку времени двигаем в любом случае: не достучались до сети —
-        // следующая попытка через сутки, а не в каждой итерации цикла.
-        lastNtpMs = now;
-        radioOff("NTP done");
-    }
-}
-
 // Поддержание сети: реконнект + периодический ре-синк NTP
 static void maintainNetwork() {
     static uint32_t lastCheck = 0;
     uint32_t now = millis();
 
-    if (!powerWifiWanted()) { maintainSurvivalRadio(now); return; }
-
     // Пока идёт ассоциация — только двигаем автомат. Проверять связь и
     // ре-синкать NTP посреди подключения нечего.
-    //
-    // ntpWaking снимаем здесь же: если попытку начало окно NTP, а режим успел
-    // смениться, эту же ассоциацию доводит обычный путь — окно кончилось, и
-    // переподключаться заново после него не надо.
-    if (wifiConnecting) { ntpWaking = false; wifiConnectStep(now); return; }
-
-    // Вернулись из выживания — радио надо поднять заново. Случай ntpWaking
-    // отдельно: там радио уже в STA, и без этой ветки соединение осталось бы
-    // недоделанным — без localIP и без mDNS, то есть дашборд не найти.
-    if (WiFi.getMode() == WIFI_OFF || ntpWaking) {
-        ntpWaking = false;
-        wifiBeginConnect();
-        return;
-    }
+    if (wifiConnecting) { wifiConnectStep(now); return; }
 
     if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
         lastCheck = now;
