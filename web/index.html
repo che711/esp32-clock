@@ -1005,12 +1005,21 @@
 
   // ── Питание дисплея ──────────────────────────────────
   function togglePower() {
-    const btn = document.getElementById('btn-power');
+    const btn  = document.getElementById('btn-power');
+    const want = !isDisplayOn;
     btn.disabled = true;
     fetch('/api/power', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'on=' + (isDisplayOn ? '0' : '1')
+      body: 'on=' + (want ? '1' : '0')
+    })
+    .then(r => r.json())
+    .then(j => {
+      // Ответ несёт фактическое состояние панели, и оно может не совпасть с
+      // просьбой: ниже POWER_SCREEN_OFF_PCT включение получает отказ. Без
+      // строки в журнале это выглядело бы как незалипшая кнопка.
+      if (j.ok && j.display_on !== want)
+        logEvent('warn', 'Display stayed off — battery too low to light it');
     })
     .catch(() => logEvent('error', 'Power request failed'))
     .finally(() => { btn.disabled = false; });

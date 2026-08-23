@@ -26,10 +26,10 @@ void powerSetAuto();              // вернуть автоматику по з
 uint32_t powerSensorIntervalMs();
 bool     powerLedEnabled();
 bool     powerWifiWanted();               // false — радио должно быть выключено
-bool     powerScreenAllowedNow(int hour); // false — экран гасим по расписанию
-// Те же два условия по отдельности. Нужны, когда часы ещё не встали: расписание
-// без времени применить не к чему, а рубеж по заряду от часа не зависит и
-// работать обязан всегда.
+// Два условия гашения экрана, и спрашиваются они всегда порознь. Расписание
+// требует знать час, рубеж по заряду — нет, поэтому он работает и до первой
+// синхронизации NTP. И перебить подсветкой можно только расписание: рубеж по
+// заряду не обходится ничем (см. applyAutoBrightness/screenSetPower).
 bool     powerScreenBatteryOkNow();       // false — заряд на исходе, панель гасим
 bool     powerScreenScheduleAllowsNow(int hour);
 

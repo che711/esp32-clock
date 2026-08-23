@@ -225,9 +225,12 @@ static void handleApiPower() {
     if (server.hasArg("on")) {
         bool on = argIsTrue(server.arg("on"));
         screenSetPower(on);      // не displaySetPower: ночью включаем с таймером
+        // Отдаём фактическое состояние панели, а не запрошенное: включение
+        // могут и не выполнить (заряд на исходе), и ответ обязан это показать.
         char resp[48];
         snprintf(resp, sizeof(resp),
-                 "{\"ok\":true,\"display_on\":%s}", on ? "true" : "false");
+                 "{\"ok\":true,\"display_on\":%s}",
+                 displayIsOn() ? "true" : "false");
         server.send(200, "application/json", resp);
         webApiBroadcast();
         return;

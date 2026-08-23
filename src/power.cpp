@@ -135,7 +135,3 @@ bool powerScreenScheduleAllowsNow(int hour) {
     return powerScreenAllowed(mode, hour,
                               POWER_NIGHT_OFF_HOUR, POWER_NIGHT_ON_HOUR);
 }
-
-bool powerScreenAllowedNow(int hour) {
-    return powerScreenBatteryOkNow() && powerScreenScheduleAllowsNow(hour);
-}
