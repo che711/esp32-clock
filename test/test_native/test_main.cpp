@@ -739,6 +739,45 @@ void test_power_screen_on_at_night_while_stopwatch_runs() {
         powerEffectiveMode(POWER_ECO, false), 3, 6, 22));
 }
 
+// ─── Глубокий сон на пустой банке ─────────────────────────
+// Ноль шкалы — команда «стоп»: ниже него часы перестают тянуть из элемента
+void test_power_sleeps_at_zero() {
+    TEST_ASSERT_TRUE (powerShouldSleep(0, true, 0));
+    TEST_ASSERT_FALSE(powerShouldSleep(1, true, 0));
+    TEST_ASSERT_FALSE(powerShouldSleep(50, true, 0));
+}
+
+// На USB процентов нет — усыплять не за что, иначе часы без батареи
+// уснули бы навсегда
+void test_power_never_sleeps_without_battery() {
+    TEST_ASSERT_FALSE(powerShouldSleep(0, false, 0));
+}
+
+// Порог пробуждения выше порога засыпания, и это обязательно: во сне банка
+// отдыхает и напряжение подрастает само. Без запаса часы вставали бы на этом
+// отскоке, тут же садились и грузились по кругу.
+void test_power_wake_threshold_has_margin() {
+    TEST_ASSERT_FALSE(powerShouldWake(0,  true, 10));   // заснули здесь
+    TEST_ASSERT_FALSE(powerShouldWake(5,  true, 10));   // отскок — мало
+    TEST_ASSERT_FALSE(powerShouldWake(9,  true, 10));
+    TEST_ASSERT_TRUE (powerShouldWake(10, true, 10));   // зарядка — встаём
+    TEST_ASSERT_TRUE (powerShouldWake(80, true, 10));
+}
+
+// Батарею вынули во сне и включили от USB — надо вставать, а не спать дальше
+void test_power_wakes_when_battery_gone() {
+    TEST_ASSERT_TRUE(powerShouldWake(0, false, 10));
+}
+
+// Пороги не должны пересечься: сон строго ниже пробуждения, иначе цикл
+void test_power_sleep_and_wake_do_not_overlap() {
+    for (uint8_t pct = 0; pct <= 100; pct++) {
+        bool sleeps = powerShouldSleep(pct, true, 0);
+        bool wakes  = powerShouldWake(pct, true, 10);
+        TEST_ASSERT_FALSE_MESSAGE(sleeps && wakes, "заряд и усыпляет, и будит");
+    }
+}
+
 void test_power_mode_from_name() {
     PowerMode m = POWER_NORMAL;
     TEST_ASSERT_TRUE(powerModeFromName("eco", &m));
@@ -1089,6 +1128,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_hold_happens_only_under_stopwatch);
     RUN_TEST(test_power_stopwatch_lifts_schedule_not_brightness);
     RUN_TEST(test_power_screen_on_at_night_while_stopwatch_runs);
+    RUN_TEST(test_power_sleeps_at_zero);
+    RUN_TEST(test_power_never_sleeps_without_battery);
+    RUN_TEST(test_power_wake_threshold_has_margin);
+    RUN_TEST(test_power_wakes_when_battery_gone);
+    RUN_TEST(test_power_sleep_and_wake_do_not_overlap);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
     RUN_TEST(test_power_mode_from_name_rejects_removed_survival);

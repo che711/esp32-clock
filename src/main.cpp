@@ -192,6 +192,55 @@ void screenSetPower(bool on) {
     }
 }
 
+// ─── Глубокий сон на пустой банке ─────────────────────────
+//
+// Ноль шкалы (3.65 В, см. battery_calc.h) — это команда «стоп». Раньше он
+// означал только «индикатор упёрся»: часы продолжали работать с погашенным
+// экраном примерно до 3.55 В, где чип уходит в brownout, — то есть поднятый
+// ради ресурса банки ноль защищал её лишь наполовину. Теперь на нуле мы
+// перестаём тянуть из элемента совсем: ~20 мкА во сне против ~25 мА.
+//
+// Будильник — таймер: физической кнопки нет, а подключение USB чип не
+// перезагружает (питание идёт через тот же диод). Поэтому раз в
+// POWER_SLEEP_CHECK_MS просыпаемся, читаем АЦП и решаем — вставать или спать
+// дальше. Проверка стоит доли секунды: ни экран, ни радио на этом пути не
+// поднимаются, полный setup() до неё не доходит.
+static void deepSleepNow(const char* why) {
+    Serial.printf("[Battery] %s -> deep sleep, проверка через %lu мин\n",
+                  why, (unsigned long)(POWER_SLEEP_CHECK_MS / 60000UL));
+    Serial.flush();
+    esp_sleep_enable_timer_wakeup((uint64_t)POWER_SLEEP_CHECK_MS * 1000ULL);
+    esp_deep_sleep_start();
+}
+
+// Полный путь: гасим то, что успели поднять, и засыпаем.
+static void sleepUntilCharged() {
+    screenSetPower(false);
+    ledColor(0, 0, 0);
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    deepSleepNow("банка пуста");
+}
+
+// Ноль должен продержаться POWER_SLEEP_CONFIRM_MS: одиночный выброс АЦП не
+// должен стоить пяти минут темноты. Ноль на пустом месте маловероятен —
+// медиана набора и сглаживание его давят, — но цена ошибки тут велика.
+static void checkBatteryEmpty() {
+    static uint32_t emptySince = 0;
+
+    if (!powerShouldSleep(battery.percent, battery.valid, POWER_SLEEP_PCT)) {
+        emptySince = 0;
+        return;
+    }
+    uint32_t now = millis();
+    if (emptySince == 0) {
+        emptySince = now ? now : 1;
+        Serial.println("[Battery] ноль шкалы, подтверждаем...");
+        return;
+    }
+    if (now - emptySince >= POWER_SLEEP_CONFIRM_MS) sleepUntilCharged();
+}
+
 // ─── Секундомер: команды ─────────────────────────────────
 // Экономия радио. MAX_MODEM холоднее всех, но задерживает входящий пакет до
 // ~0.9 с: под секундомером это ощущается — кнопка в браузере откликается
@@ -483,8 +532,26 @@ void setup() {
         for (int i = 0; i < 4; i++) { ledColor(20,0,0); delay(150); ledColor(0,0,0); delay(150); }
     }
     batteryInit();
-    weather = sensorRead();
     battery = batteryRead();
+
+    // Проснулись по таймеру — значит уснули на пустой банке. Решаем прямо
+    // здесь, пока не подняты ни экран, ни радио: если заряд не подрос, полный
+    // старт был бы дороже всего, что мы за него получим.
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER &&
+        !powerShouldWake(battery.percent, battery.valid, POWER_WAKE_PCT)) {
+        deepSleepNow("заряд всё ещё на нуле");
+    }
+
+    // Время сон переживает: RTC идёт и в нём. Если часы показывают
+    // правдоподобную дату, синхронизация уже была — иначе экран рисовал бы
+    // прочерки при исправных часах, пока не дойдёт очередь до NTP.
+    struct tm t;
+    if (localTimeNow(&t)) {
+        timeSynced = true;
+        Serial.println("RTC пережил перезагрузку, время на месте");
+    }
+
+    weather = sensorRead();
 
     displayBegin();
     displaySplash("Connecting WiFi...");
@@ -507,7 +574,8 @@ void setup() {
 void loop() {
     webApiLoop();
     batteryLoop();            // копит отсчёты АЦП по одному, без задержек
-    powerLoop();              // режим энергосбережения по заряду
+    checkBatteryEmpty();      // ноль шкалы -> deep sleep, дальше не возвращаемся
+    powerLoop();              // уровень энергосбережения
     maintainNetwork();
     updateWeather();          // BMP280 + батарея по таймеру + LED
 

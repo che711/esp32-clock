@@ -105,6 +105,25 @@ inline bool powerScreenBatteryOk(uint8_t pct, bool valid, uint8_t offPct) {
     return !(valid && pct <= offPct);
 }
 
+// Пора ли остановиться совсем. Ноль шкалы — это не «индикатор упёрся», а
+// «дальше разряжать вредно»: ниже него часы уходят в deep sleep и перестают
+// тянуть из банки. Без батареи (питание от USB) правило не применяется —
+// процентов там нет, и усыплять устройство не за что.
+inline bool powerShouldSleep(uint8_t pct, bool valid, uint8_t sleepPct) {
+    return valid && pct <= sleepPct;
+}
+
+// И обратное: вставать ли после короткого пробуждения по таймеру. Порог выше
+// того, на котором заснули, — иначе отскок напряжения на отдыхе (во сне
+// нагрузки нет, банка расслабляется на десятки милливольт) поднимал бы часы
+// обратно, они бы тут же садились и грузились по кругу.
+//
+// Пропавшая батарея тоже повод встать: valid == false означает USB, а на USB
+// спать незачем.
+inline bool powerShouldWake(uint8_t pct, bool valid, uint8_t wakePct) {
+    return !valid || pct >= wakePct;
+}
+
 // Оба условия сразу — для случая, когда час известен.
 inline bool powerScreenAllowedAt(PowerMode m, int hour, int onHour, int offHour,
                                  uint8_t pct, bool valid, uint8_t offPct) {
