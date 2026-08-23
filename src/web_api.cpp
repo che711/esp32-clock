@@ -4,6 +4,7 @@
 #include "display.h"
 #include "power.h"
 #include "clock_utils.h"
+#include "battery_calc.h"
 #include "origin_check.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -49,6 +50,14 @@ static bool wsValidateHeader(String headerName, String headerValue) {
     return originIsLocalDevice(headerValue.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
 }
 
+// Почему заряда нет. «Батареи нет» и «напряжение выше нормы» — разные беды:
+// первая штатна (питание от USB), вторая означает, что на линию банки лезет
+// что-то постороннее, и списывать её на отсутствие банки нельзя.
+static const char* batteryState() {
+    if (battery.valid) return "ok";
+    return batteryRawVoltage() > BATTERY_PLAUSIBLE_MAX_V ? "over" : "none";
+}
+
 // ─── JSON ─────────────────────────────────────────────────
 static void buildJson(char* buf, size_t sz) {
     char uptimeBuf[32];
@@ -70,6 +79,7 @@ static void buildJson(char* buf, size_t sz) {
         "\"brightness_label\":\"%s\","
         "\"brightness_manual\":%s,"
         "\"display_on\":%s,"
+        "\"screen_peek\":%lu,"
         "\"sw_state\":%d,"
         "\"sw_ms\":%lu,"
         "\"bmp_valid\":%s,"
@@ -82,6 +92,8 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_valid\":%s,"
         "\"bat_pct\":%d,"
         "\"bat_v\":%.2f,"
+        "\"bat_raw_v\":%.2f,"
+        "\"bat_state\":\"%s\","
         "\"bat_low\":%s,"
         "\"power_mode\":\"%s\","
         "\"power_auto\":%s,"
@@ -95,10 +107,11 @@ static void buildJson(char* buf, size_t sz) {
         (int)webSocket.connectedClients(),
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)ESP.getHeapSize(),
-        brightnessPct(displayContrast()),
+        brightnessPct(displayLevel()),
         displayBrightnessLabel(),
         displayIsManual() ? "true" : "false",
         displayIsOn()     ? "true" : "false",
+        (unsigned long)screenPeekLeftS(),
         (int)stopwatch.state,
         (unsigned long)stopwatch.elapsed(millis()),
         weather.valid ? "true" : "false",
@@ -111,6 +124,8 @@ static void buildJson(char* buf, size_t sz) {
         battery.valid ? "true" : "false",
         (int)battery.percent,
         battery.voltage,
+        batteryRawVoltage(),
+        batteryState(),
         battery.low ? "true" : "false",
         powerModeName(),
         powerIsAuto() ? "true" : "false",
@@ -199,7 +214,7 @@ static void handleApiPower() {
     if (!originAccepted()) return sendForeignOrigin();
     if (server.hasArg("on")) {
         bool on = server.arg("on") != "0";
-        displaySetPower(on);
+        screenSetPower(on);      // не displaySetPower: ночью включаем с таймером
         char resp[48];
         snprintf(resp, sizeof(resp),
                  "{\"ok\":true,\"display_on\":%s}", on ? "true" : "false");

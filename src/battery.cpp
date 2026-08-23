@@ -24,14 +24,29 @@ static uint32_t   samples[BATTERY_SAMPLES];
 static uint8_t    nSamples     = 0;
 static uint32_t   lastSampleMs = 0;
 static float      smoothV      = 0.0f;   // 0 — фильтр пуст
+static float      rawV         = 0.0f;   // до проверки правдоподобия
+static uint32_t   lastAdcMv    = 0;      // медиана набора, мВ на пине
 static BatteryData latest{};
 
 // Пересчёт набора в результат. Массив сортируется медианой на месте.
 static void applySamples() {
-    float vAdc = batteryMedianMv(samples, BATTERY_SAMPLES) / 1000.0f;
+    lastAdcMv  = batteryMedianMv(samples, BATTERY_SAMPLES);
+    float vAdc = lastAdcMv / 1000.0f;
     float v    = vAdc * BATTERY_DIVIDER * BATTERY_CAL;
+    rawV       = v;               // запоминаем до отбраковки, для диагностики
 
     if (!batteryVoltagePlausible(v)) {
+        // Молча отбрасывать нельзя: снаружи пропадает и иконка на экране, и
+        // плитка в дашборде, а причина — цифра, которой никто не видит.
+        // Раз в 10 с, в ритме heartbeat: чаще незачем, реже — можно не застать.
+        static uint32_t lastComplain = 0;
+        uint32_t now = millis();
+        if (lastComplain == 0 || now - lastComplain >= 10000) {
+            lastComplain = now ? now : 1;
+            Serial.printf("[Battery] %.2f В вне %.2f..%.2f (АЦП %u мВ) — считаем, что АКБ нет\n",
+                          v, BATTERY_PLAUSIBLE_MIN_V, BATTERY_PLAUSIBLE_MAX_V,
+                          (unsigned)lastAdcMv);
+        }
         smoothV = 0.0f;                  // АКБ сняли — фильтр начать заново
         latest  = BatteryData{};
         return;
@@ -78,12 +93,16 @@ void batteryLoop() {
     applySamples();
 }
 
-BatteryData batteryRead() { return latest; }
+BatteryData batteryRead()   { return latest; }
+float       batteryRawVoltage() { return rawV; }
+uint32_t    batteryAdcMv()      { return lastAdcMv; }
 
 #else  // BATTERY_ENABLED == false — заглушки
 
 void batteryInit() {}
 void batteryLoop() {}
-BatteryData batteryRead() { return BatteryData{}; }
+BatteryData batteryRead()   { return BatteryData{}; }
+float       batteryRawVoltage() { return 0.0f; }
+uint32_t    batteryAdcMv()      { return 0; }
 
 #endif

@@ -304,6 +304,29 @@
   .mode-btn.active { background: var(--accent); color: #fff; pointer-events: none; }
   .mode-btn:not(.active):hover { color: var(--text-dim); }
 
+  /* Авто — политика, а не уровень: отдельный тумблер, чтобы не читалось
+     как четвёртый режим в одном ряду с тремя настоящими. */
+  .pm-switch { display: flex; align-items: center; gap: 8px; cursor: pointer;
+               user-select: none; -webkit-user-select: none; }
+  .pm-switch input { position: absolute; opacity: 0; pointer-events: none; }
+  .pm-track { width: 34px; height: 19px; border-radius: 999px; flex-shrink: 0;
+              background: var(--surface-3); border: 1px solid var(--line-soft);
+              position: relative; transition: background 0.18s, border-color 0.18s; }
+  .pm-track::after { content: ''; position: absolute; top: 2px; left: 2px;
+                     width: 13px; height: 13px; border-radius: 50%;
+                     background: var(--text-faint);
+                     transition: transform 0.18s, background 0.18s; }
+  .pm-switch input:checked + .pm-track { background: var(--accent); border-color: var(--accent); }
+  .pm-switch input:checked + .pm-track::after { transform: translateX(15px); background: #fff; }
+  .pm-lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.8px;
+            text-transform: uppercase; color: var(--text-faint); transition: color 0.18s; }
+  .pm-switch input:checked ~ .pm-lbl { color: var(--accent); }
+  .pm-switch input:focus-visible + .pm-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Уровнями распоряжается автоматика — показываем выбор, но не даём трогать */
+  .seg.locked { opacity: 0.5; }
+  .seg.locked .mode-btn { pointer-events: none; }
+
   .slider-row { display: flex; align-items: center; gap: 12px; }
   .slider-ico { font-size: 13px; flex-shrink: 0; opacity: 0.6; }
   input[type="range"] {
@@ -597,7 +620,7 @@
           <div class="batt-icon"><div class="batt-fill" id="bat-fill"></div></div>
           <div>
             <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
-            <div class="kv-note">battery</div>
+            <div class="kv-note" id="bat-note">battery</div>
           </div>
         </div>
         <div style="text-align:right">
@@ -658,12 +681,16 @@
           <div class="tile-label">Power saving</div>
           <span class="level-chip" id="pm-label">—</span>
         </div>
-        <div class="seg">
-          <button class="mode-btn active" id="pm-auto"     onclick="setPowerMode('auto')">Auto</button>
-          <button class="mode-btn"        id="pm-normal"   onclick="setPowerMode('normal')">Normal</button>
-          <button class="mode-btn"        id="pm-eco"      onclick="setPowerMode('eco')">Eco</button>
-          <button class="mode-btn"        id="pm-survival" onclick="setPowerMode('survival')">Survival</button>
-        </div>
+        <label class="pm-switch" title="Pick the level automatically from battery charge">
+          <input type="checkbox" id="pm-auto" checked onchange="setPowerAuto(this.checked)">
+          <span class="pm-track"></span>
+          <span class="pm-lbl">By charge</span>
+        </label>
+      </div>
+      <div class="seg locked" id="pm-seg">
+        <button class="mode-btn" id="pm-normal"   onclick="setPowerMode('normal')">Normal</button>
+        <button class="mode-btn" id="pm-eco"      onclick="setPowerMode('eco')">Eco</button>
+        <button class="mode-btn" id="pm-survival" onclick="setPowerMode('survival')">Survival</button>
       </div>
       <div class="tile-sub" id="pm-hint">—</div>
     </div>
@@ -800,6 +827,7 @@
   // ── Состояние ────────────────────────────────────────
   let isManual          = false;
   let isDisplayOn       = true;
+  let lastScreenPeek    = 0;      // секунд до авто-гашения ночью, 0 — не горит по подсветке
   let isDragging        = false;
   let modeChangePending = false;
   let isFahrenheit      = localStorage.getItem('unit') === 'f';
@@ -988,10 +1016,13 @@
     .finally(() => { btn.disabled = false; });
   }
 
-  function _applyPowerUI(on) {
+  function _applyPowerUI(on, peek) {
     isDisplayOn = on;
     const btn = document.getElementById('btn-power');
-    btn.textContent = on ? '⏻ Display on' : '⏻ Display off';
+    // Ночью экран включается на время — показываем остаток прямо на кнопке,
+    // иначе гашение через полминуты выглядит сбоем, а не задумкой.
+    btn.textContent = on ? (peek ? '⏻ Display on · ' + peek + 's' : '⏻ Display on')
+                         : '⏻ Display off';
     btn.className   = 'btn-action btn-power ' + (on ? 'on' : 'off');
   }
 
@@ -1001,43 +1032,57 @@
   let pmPending = false;
 
   const PM_HINT = {
-    normal:   'Screen always on, sensor every 10 s, radio at full power.',
-    eco:      'Screen dimmed and off 23:00–07:00, sensor every 30 s, radio sleeps longer.',
-    survival: 'Wi-Fi off, screen on schedule only, clock re-synced once a day.'
+    normal:   'Screen always on, sensor every 60 s, radio at full power. Auto picks this while the stopwatch runs.',
+    eco:      'Default level. Screen dimmed and off 22:00–06:00, sensor every 2 min, radio sleeps longer.',
+    survival: 'Wi-Fi off, screen off 22:00–06:00, clock re-synced once a day. Auto picks this below 10%.'
   };
 
   function _applyPowerModeUI() {
-    ['auto', 'normal', 'eco', 'survival'].forEach(k => {
-      const on = pmAuto ? (k === 'auto') : (k === pmMode);
-      document.getElementById('pm-' + k).classList.toggle('active', on);
+    ['normal', 'eco', 'survival'].forEach(k => {
+      document.getElementById('pm-' + k).classList.toggle('active', k === pmMode);
     });
+    // Пока выбирает автоматика, уровни показываем, но трогать не даём:
+    // подсвечен тот, который она выбрала прямо сейчас.
+    document.getElementById('pm-seg').classList.toggle('locked', pmAuto);
+    document.getElementById('pm-auto').checked = pmAuto;
     document.getElementById('pm-label').textContent = pmAuto ? 'auto · ' + pmMode : pmMode;
     document.getElementById('pm-hint').textContent  = PM_HINT[pmMode] || '';
   }
   _applyPowerModeUI();
 
-  function setPowerMode(mode) {
-    // Рисуем выбор сразу, не дожидаясь ответа: пока запрос в пути, приходящие
-    // по WebSocket снимки состояния не должны отыгрывать кнопку назад.
+  // Общая отправка: рисуем выбор сразу, не дожидаясь ответа, — пока запрос
+  // в пути, приходящие по WebSocket снимки не должны отыгрывать его назад.
+  function _sendPowerMode(body, note) {
     pmPending = true;
-    if (mode === 'auto') pmAuto = true;
-    else { pmAuto = false; pmMode = mode; }
     _applyPowerModeUI();
-
     fetch('/api/powermode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: mode === 'auto' ? 'auto=1' : 'mode=' + mode
+      body: body
     })
     .then(r => r.json())
     .then(j => {
       pmMode = j.mode;
       pmAuto = j.auto === true;
       _applyPowerModeUI();
-      logEvent('info', 'Power mode: ' + (pmAuto ? 'auto (' + j.mode + ')' : j.mode));
+      logEvent('info', note(j));
     })
     .catch(() => logEvent('error', 'Power mode request failed'))
     .finally(() => { pmPending = false; });
+  }
+
+  function setPowerAuto(on) {
+    // Выключение тумблера фиксирует то, что автоматика выбрала к этому моменту:
+    // так режим не прыгает под руками в момент переключения.
+    if (!on) return setPowerMode(pmMode);
+    pmAuto = true;
+    _sendPowerMode('auto=1', j => 'Power mode: auto (' + j.mode + ')');
+  }
+
+  function setPowerMode(mode) {
+    pmAuto = false;
+    pmMode = mode;
+    _sendPowerMode('mode=' + mode, j => 'Power mode locked: ' + j.mode);
   }
 
   // ── WebSocket ────────────────────────────────────────
@@ -1226,17 +1271,30 @@
       setPill('mf-pill', 'mf-pill-txt', 'No sensor', 'crit');
     }
 
-    // ── Батарея (скрываем при питании от USB) ──
-    const batTile = document.getElementById('bat-tile');
+    // ── Батарея ──
+    // Плитка не прячется никогда, даже когда банки нет. Исчезающая плитка
+    // перекраивает сетку и читается как поломка дашборда, а не как «питание
+    // от USB»; вместо этого показываем прочерк и то, что реально намерилось.
+    const bf   = document.getElementById('bat-fill');
+    const note = document.getElementById('bat-note');
     if (d.bat_valid) {
-      batTile.style.display = '';
       document.getElementById('bat-pct').textContent = d.bat_pct;
       document.getElementById('bat-v').textContent   = d.bat_v.toFixed(2);
-      const bf = document.getElementById('bat-fill');
       bf.style.width = d.bat_pct + '%';
-      bf.className = 'batt-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
+      bf.className   = 'batt-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
+      note.textContent = 'battery';
     } else {
-      batTile.style.display = 'none';
+      // Сырое напряжение — единственная зацепка, когда замер ушёл за границы
+      // правдоподобия: без него «нет батареи» неотличимо от сбоя делителя.
+      const raw  = typeof d.bat_raw_v === 'number' ? d.bat_raw_v : 0;
+      const over = d.bat_state === 'over';
+      document.getElementById('bat-pct').textContent = '—';
+      document.getElementById('bat-v').textContent   = raw > 0.05 ? raw.toFixed(2) : '—';
+      bf.style.width = '0%';
+      // Превышение — не «банки нет»: на линии банки что-то постороннее,
+      // и подпись должна звать смотреть схему, а не списывать на USB.
+      bf.className     = 'batt-fill' + (over ? ' crit' : '');
+      note.textContent = over ? 'over-voltage' : raw > 0.05 ? 'no battery · raw' : 'no battery';
     }
 
     // curl-примеры под реальный IP
@@ -1257,10 +1315,16 @@
       if (serverManual !== isManual) { isManual = serverManual; _applyModeUI(serverManual); }
     }
 
+    const peek = d.screen_peek || 0;
     if (d.display_on !== isDisplayOn) {
-      _applyPowerUI(d.display_on);
-      logEvent('info', 'Display turned ' + (d.display_on ? 'on' : 'off'));
+      _applyPowerUI(d.display_on, peek);
+      logEvent('info', !d.display_on ? 'Display turned off'
+                     : peek ? 'Display on for ' + peek + ' s — night schedule'
+                            : 'Display turned on');
+    } else if (peek !== lastScreenPeek) {
+      _applyPowerUI(d.display_on, peek);      // тикает обратный отсчёт
     }
+    lastScreenPeek = peek;
 
     if (!pmPending && d.power_mode !== undefined) {
       const auto    = d.power_auto === true;

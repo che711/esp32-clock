@@ -2,6 +2,7 @@
 #include "config.h"
 #include "app.h"
 #include "clock_utils.h"
+#include "display_calc.h"
 #include <U8g2lib.h>
 #include <SPI.h>
 
@@ -12,10 +13,17 @@
 static U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI
     u8g2(U8G2_R0, OLED_CS_PIN, OLED_DC_PIN, OLED_RST_PIN);
 
-static bool        displayOn        = true;
-static uint8_t     currentContrast  = CONTRAST_MAX;
+static bool        displayOn        = true;   // питание: /api/power и расписание
+// Уровень шкалы интерфейса, 0..255. В регистры тока панели он переводится
+// в refreshPanel() — там же объяснено, почему это не одно и то же.
+static uint8_t     currentLevel     = CONTRAST_MAX;
 static bool        manualBrightness = false;
 static const char* brightnessLabel  = "Day";
+
+// Питание панели и яркость связаны (см. refreshPanel), поэтому обе функции
+// нужны раньше, чем идут их разделы.
+static void refreshPanel();
+static void applyLevel(uint8_t val, const char* label);
 
 // Раскладка часов: поля слева/справа и место под знак градуса.
 static const int CLOCK_MARGIN  = 4;
@@ -32,7 +40,7 @@ void displayBegin() {
 #if HAS_DISPLAY
     SPI.begin(OLED_CLK_PIN, -1, OLED_DIN_PIN, OLED_CS_PIN);
     u8g2.begin();
-    u8g2.setContrast(currentContrast);
+    refreshPanel();
 #endif
 }
 
@@ -48,33 +56,55 @@ void displaySplash(const char* msg) {
 }
 
 // ─── Питание ──────────────────────────────────────────────
-void displaySetPower(bool on) {
-    displayOn = on;
+// Панель светится, только когда её не выключили И контраст ненулевой.
+// Регистр контраста SSD1322 (0xC1) задаёт ток сегментов, а не яркость до
+// нуля: на нулевом значении панель не гаснет, а продолжает заметно светить.
+// Поэтому «0 %» доводится до конца через power save — иначе ползунок в
+// нижнем положении не выключал бы экран, а лишь слегка притушивал.
+static bool panelLit() { return displayOn && currentLevel > 0; }
+
+static void refreshPanel() {
 #if HAS_DISPLAY
-    if (on) {
-        u8g2.setPowerSave(0);
-        u8g2.setContrast(currentContrast);
-    } else {
-        u8g2.setPowerSave(1);
-    }
+    if (!panelLit()) { u8g2.setPowerSave(1); return; }
+
+    // Ток задают два регистра, а не один (см. display_calc.h). setContrast()
+    // из u8g2 пишет только 0xC1, master-регистр шлём сами — иначе нижняя
+    // половина шкалы упирается в 1/256 полного тока и экран на ней светит
+    // почти так же, как на максимуме.
+    PanelDrive d = panelDriveForLevel(currentLevel);
+    u8g2.sendF("ca", 0x0C7, d.master);
+    u8g2.setContrast(d.contrast);
+    u8g2.setPowerSave(0);      // ток выставлен заранее: панель не моргнёт
 #endif
-    Serial.printf("Display -> %s\n", on ? "ON" : "OFF");
 }
 
-bool displayIsOn() { return displayOn; }
+void displaySetPower(bool on) {
+    displayOn = on;
+    // Включение при нулевой яркости иначе не дало бы ничего видимого —
+    // панель осталась бы в power save. Поднимаем до нижней ступени шкалы:
+    // команда «включить экран» должна давать результат, который видно.
+    if (on && currentLevel == 0) applyLevel(1, "Manual");
+    else                         refreshPanel();
+    Serial.printf("Display -> %s\n", panelLit() ? "ON" : "OFF");
+}
+
+// Наружу отдаём фактическое состояние панели, а не флаг питания: расписание
+// в main.cpp и дашборд спрашивают «экран сейчас виден?», и при нулевой
+// яркости честный ответ — нет.
+bool displayIsOn() { return panelLit(); }
 
 // ─── Яркость ──────────────────────────────────────────────
-static void applyContrast(uint8_t val, const char* label) {
-    currentContrast = val;
+static void applyLevel(uint8_t val, const char* label) {
+    currentLevel = val;
     brightnessLabel = label;
-#if HAS_DISPLAY
-    if (displayOn) u8g2.setContrast(currentContrast);
-#endif
+    refreshPanel();      // ноль гасит панель, ненулевое — пересчитывает ток
 }
 
 void displaySetManualPct(int pct) {
     manualBrightness = true;
-    applyContrast(pctToContrast(pct), "Manual");
+    // Ползунок в нуле — это «выключить», а не «еле светит»: гашение делает
+    // refreshPanel(), здесь остаётся назвать уровень своим именем.
+    applyLevel(pctToContrast(pct), pct <= 0 ? "Off" : "Manual");
 }
 
 void displaySetAuto() { manualBrightness = false; }
@@ -93,17 +123,18 @@ void displaySetAutoScale(uint8_t pct) {
 void displayAutoForHour(int hour) {
     if (manualBrightness) return;
     BrightnessLevel b = brightnessForHour(hour);
-    // Ниже единицы не опускаемся: 0 у SSD1322 — это не «еле-еле», а погасшая
-    // панель, и экран пропал бы вместо того, чтобы просто потускнеть.
+    // Ниже единицы не опускаемся: ноль гасит панель совсем (см. refreshPanel),
+    // а автоматика яркости экран выключать не должна — за это отвечают ночное
+    // расписание и порог заряда.
     uint8_t scaled = (uint8_t)((uint32_t)b.contrast * autoScalePct / 100);
     if (scaled == 0) scaled = 1;
-    if (scaled != currentContrast) {
-        applyContrast(scaled, b.label);
-        Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentContrast);
+    if (scaled != currentLevel) {
+        applyLevel(scaled, b.label);
+        Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentLevel);
     }
 }
 
-uint8_t     displayContrast()        { return currentContrast; }
+uint8_t     displayLevel()           { return currentLevel; }
 const char* displayBrightnessLabel() { return brightnessLabel; }
 
 void displayInvalidateStopwatch() { swMsBoxX = -1; }
@@ -213,7 +244,7 @@ void displayDraw() {
 #if !HAS_DISPLAY
     return;
 #else
-    if (!displayOn) return;
+    if (!panelLit()) return;
     u8g2.clearBuffer();
 
     if (!stopwatch.idle()) {
@@ -323,7 +354,7 @@ void displayStopwatchFrame() {
 #if !HAS_DISPLAY
     return;
 #else
-    if (!displayOn) return;
+    if (!panelLit()) return;
 
     uint32_t el = stopwatch.elapsed(millis());
     char full[16];

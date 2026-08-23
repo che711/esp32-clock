@@ -26,5 +26,5 @@ bool displayIsManual();
 void displayAutoForHour(int hour);    // применить уровень часа (в ручном — ничего)
 void displaySetAutoScale(uint8_t pct); // масштаб авто-яркости, % (эконом-режимы)
 
-uint8_t     displayContrast();        // текущий контраст 0..255
+uint8_t     displayLevel();           // текущий уровень шкалы 0..255
 const char* displayBrightnessLabel(); // "Night" / "Day" / "Manual" …

@@ -79,12 +79,42 @@ float dieTempC() {
 // обратно только то, что сами же и погасили.
 static bool screenOffBySchedule = false;
 
+// Ночью посмотреть на часы всё-таки надо, поэтому команда «включить экран»
+// работает и в запрещённый час — но не навсегда: держим панель
+// POWER_SCREEN_PEEK_MS и гасим сами. Забыть выключить легко, а расплата за
+// забытый экран — самый крупный потребитель, горящий до утра.
+static uint32_t screenPeekUntil = 0;      // 0 — подсветки нет
+
+// Сравнение через знаковую разность, а не «now < until»: так подсветка
+// переживает переполнение millis() на 49-м дне работы.
+static bool screenPeekActive(uint32_t now) {
+    if (screenPeekUntil == 0) return false;
+    if ((int32_t)(now - screenPeekUntil) >= 0) {
+        screenPeekUntil = 0;
+        Serial.println("Display: night peek expired");
+        return false;
+    }
+    return true;
+}
+
 void applyAutoBrightness() {
     if (!timeSynced) return;
     struct tm t;
     if (!localTimeNow(&t)) return;
 
     bool allowed = powerScreenAllowedNow(t.tm_hour);
+
+    // Пока идёт подсветка, расписание уступает — но только ей одной:
+    // истечёт окно, и ближайший же заход погасит панель обычным путём.
+    if (!allowed && screenPeekActive(millis())) {
+        displayAutoForHour(t.tm_hour);
+        return;
+    }
+
+    // Час стал рабочим — подсветку снимаем: экран и так горит по расписанию,
+    // а оставленный отсчёт врал бы в дашборде про скорое гашение.
+    if (allowed) screenPeekUntil = 0;
+
     if (!allowed) {
         if (displayIsOn()) {
             displaySetPower(false);
@@ -98,6 +128,38 @@ void applyAutoBrightness() {
     }
 
     displayAutoForHour(t.tm_hour);   // в ручном режиме внутри ничего не делает
+}
+
+// Сколько ещё гореть по подсветке, секунды; 0 — подсветки нет. Нужно
+// дашборду: без обратного отсчёта самопроизвольное гашение через полминуты
+// выглядит сбоем, а не задумкой.
+uint32_t screenPeekLeftS() {
+    if (screenPeekUntil == 0) return 0;
+    int32_t left = (int32_t)(screenPeekUntil - millis());   // знаковая: см. выше
+    if (left <= 0) return 0;
+    return ((uint32_t)left + 999) / 1000;                   // вверх, до целых секунд
+}
+
+// Команда питания экрана из дашборда. Отдельно от displaySetPower(), потому
+// что кроме самой панели трогает расписание: включение в запрещённый час
+// заводит подсветку, выключение снимает её досрочно.
+void screenSetPower(bool on) {
+    displaySetPower(on);
+
+    if (!on) {
+        screenPeekUntil = 0;         // погасили сами — досматривать нечего
+        return;
+    }
+
+    struct tm t;
+    if (timeSynced && localTimeNow(&t) && !powerScreenAllowedNow(t.tm_hour)) {
+        screenPeekUntil = millis() + POWER_SCREEN_PEEK_MS;
+        if (screenPeekUntil == 0) screenPeekUntil = 1;   // 0 занят под «нет подсветки»
+        Serial.printf("Display: night peek %lus\n",
+                      (unsigned long)(POWER_SCREEN_PEEK_MS / 1000));
+    } else {
+        screenPeekUntil = 0;         // час рабочий — гасить по таймеру незачем
+    }
 }
 
 // ─── Секундомер: команды ─────────────────────────────────
@@ -316,12 +378,16 @@ static void updateWeather() {
         ledBlinking = false;
     }
 
-    // Период опроса задаёт профиль энергосбережения: в экономе датчик
-    // спрашиваем реже, погода за 30 с никуда не убежит.
+    // Заряд забираем каждую итерацию: batteryLoop() всё равно считает его
+    // непрерывно, и копия структуры бесплатна. Иначе показания зависели бы
+    // от периода опроса датчика, а от него зависят пороги гашения экрана.
+    battery = batteryRead();
+
+    // Погоду спрашиваем редко: температура и давление за минуту никуда
+    // не убегут, а каждый опрос I²C — это работа шины и ядра.
     if (now - lastSensorMs >= powerSensorIntervalMs()) {
         lastSensorMs = now;
         weather = sensorRead();
-        battery = batteryRead();
         if (!weather.valid) {
             ledColor(4, 0, 0);                   // красный — ошибка датчика
             ledBlinking = false;                 // горит ровно, не мигок
@@ -413,7 +479,7 @@ void loop() {
     if (millis() - lastHb >= 5000) {
         lastHb = millis();
         Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u "
-                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%% pm=%s\n",
+                      "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%% v=%.2f adc=%umV pm=%s\n",
                       (unsigned long)(millis() / 1000),
                       WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
@@ -424,6 +490,7 @@ void loop() {
                       weather.valid ? weather.temperature : 0.0f,
                       weather.valid ? weather.pressure : 0.0f,
                       battery.valid ? battery.percent : -1,
+                      batteryRawVoltage(), (unsigned)batteryAdcMv(),
                       powerModeName());
     }
 

@@ -32,3 +32,5 @@ void swPause();
 void swReset();
 
 void applyAutoBrightness();      // уровень по текущему часу, если режим авто
+void screenSetPower(bool on);    // питание экрана из UI; ночью — на POWER_SCREEN_PEEK_MS
+uint32_t screenPeekLeftS();      // секунд до авто-гашения ночью, 0 — не горит по подсветке
