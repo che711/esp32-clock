@@ -126,11 +126,33 @@ void test_brightness_pct_full() {
 }
 
 void test_brightness_pct_night() {
-    TEST_ASSERT_EQUAL_UINT8(5, brightnessPct(15));
+    TEST_ASSERT_EQUAL_UINT8(6, brightnessPct(15));   // 15/255 = 5.88 %, округляем
 }
 
 void test_brightness_pct_zero() {
     TEST_ASSERT_EQUAL_UINT8(0, brightnessPct(0));
+}
+
+// Ноль — это «выключить», а не «почти не светит»: округление не должно его
+// сдвинуть, иначе ползунок в нижнем положении переставал бы гасить панель.
+void test_pct_zero_stays_off() {
+    TEST_ASSERT_EQUAL_UINT8(0, pctToContrast(0));
+    TEST_ASSERT_EQUAL_UINT8(0, pctToContrast(-5));
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_MAX, pctToContrast(100));
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_MAX, pctToContrast(150));
+}
+
+// Путь «проценты → уровень → проценты» обязан сходиться на всей шкале. С
+// отбрасыванием дробной части он терял единицу на каждом обороте (50 → 127 →
+// 49 → 124 → 48): дашборд показывал не то, что выставили, а скрипт, читающий
+// brightness_pct и пишущий его обратно, медленно уводил яркость вниз.
+void test_pct_contrast_roundtrip_is_stable() {
+    for (int pct = 0; pct <= 100; pct++) {
+        uint8_t level = pctToContrast(pct);
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)pct, brightnessPct(level));
+        // и второй оборот не сдвигает уровень
+        TEST_ASSERT_EQUAL_UINT8(level, pctToContrast(brightnessPct(level)));
+    }
 }
 
 // ─── Время ────────────────────────────────────────────────
@@ -319,6 +341,58 @@ void test_sw_survives_millis_overflow() {
 
 // Веб-интерфейс получает состояние числом в поле sw_state —
 // значения менять нельзя, иначе кнопки в браузере поедут
+// ─── Номер замера (gen) ──────────────────────────────────
+// Круги живут в браузере, устройство о них не знает. Отличить «связь моргнула,
+// замер тот же» от «замер начали заново» можно только по этому номеру, поэтому
+// правило, когда он меняется, а когда нет, закреплено тестами.
+
+// Пауза и продолжение — тот же замер: круги обязаны пережить их.
+void test_sw_gen_survives_pause_resume() {
+    Stopwatch sw;
+    sw.start(1000);
+    uint32_t gen = sw.gen;
+    sw.pause(2000);
+    TEST_ASSERT_EQUAL_UINT32(gen, sw.gen);
+    sw.start(3000);
+    TEST_ASSERT_EQUAL_UINT32(gen, sw.gen);
+}
+
+// Повторный старт на ходу ничего не меняет — не меняет и номер.
+void test_sw_gen_unchanged_on_restart_noop() {
+    Stopwatch sw;
+    sw.start(1000);
+    uint32_t gen = sw.gen;
+    sw.start(1500);
+    TEST_ASSERT_EQUAL_UINT32(gen, sw.gen);
+}
+
+// Сброс и старт из простоя — уже другой замер.
+void test_sw_gen_changes_on_new_run() {
+    Stopwatch sw;
+    sw.start(1000);
+    uint32_t first = sw.gen;
+    sw.reset();
+    TEST_ASSERT_NOT_EQUAL(first, sw.gen);
+    uint32_t afterReset = sw.gen;
+    sw.start(2000);
+    TEST_ASSERT_NOT_EQUAL(afterReset, sw.gen);
+    TEST_ASSERT_NOT_EQUAL(first, sw.gen);
+}
+
+// Номер не переиспользуется: подряд идущие замеры различимы между собой.
+void test_sw_gen_is_unique_per_run() {
+    Stopwatch sw;
+    uint32_t seen[4];
+    for (int i = 0; i < 4; i++) {
+        sw.start(1000 * (i + 1));
+        seen[i] = sw.gen;
+        sw.reset();
+    }
+    for (int i = 0; i < 4; i++)
+        for (int j = i + 1; j < 4; j++)
+            TEST_ASSERT_NOT_EQUAL(seen[i], seen[j]);
+}
+
 void test_sw_state_codes_are_stable() {
     TEST_ASSERT_EQUAL_UINT8(0, (uint8_t)Stopwatch::IDLE);
     TEST_ASSERT_EQUAL_UINT8(1, (uint8_t)Stopwatch::RUNNING);
@@ -870,6 +944,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_brightness_pct_full);
     RUN_TEST(test_brightness_pct_night);
     RUN_TEST(test_brightness_pct_zero);
+    RUN_TEST(test_pct_zero_stays_off);
+    RUN_TEST(test_pct_contrast_roundtrip_is_stable);
 
     RUN_TEST(test_format_time_normal);
     RUN_TEST(test_format_time_midnight);
@@ -903,6 +979,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_sw_reset_clears);
     RUN_TEST(test_sw_reset_while_running);
     RUN_TEST(test_sw_survives_millis_overflow);
+    RUN_TEST(test_sw_gen_survives_pause_resume);
+    RUN_TEST(test_sw_gen_unchanged_on_restart_noop);
+    RUN_TEST(test_sw_gen_changes_on_new_run);
+    RUN_TEST(test_sw_gen_is_unique_per_run);
     RUN_TEST(test_sw_state_codes_are_stable);
 
     RUN_TEST(test_battery_full);

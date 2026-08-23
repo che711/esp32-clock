@@ -1357,10 +1357,10 @@
     // Ведущее всегда устройство: первый фрейм принимаем целиком.
     if (d.sw_state !== undefined) {
       if (!swServerSynced) {
-        adoptStopwatch(d.sw_state, d.sw_ms);
+        adoptStopwatch(d.sw_state, d.sw_ms, d.sw_gen);
         swServerSynced = true;
       } else {
-        syncStopwatch(d.sw_state, d.sw_ms);
+        syncStopwatch(d.sw_state, d.sw_ms, d.sw_gen);
       }
     }
   }
@@ -1433,6 +1433,13 @@
   let swLaps         = [];
   let swLastLapMs    = 0;
   let swServerSynced = false;
+  // Номер замера с устройства (sw_gen). -1 — ещё не знаем ни одного.
+  // По нему круги переживают обрыв связи: см. adoptStopwatch.
+  let swGen          = -1;
+  // Своя команда сама двигает номер замера (старт из простоя, сброс), и первый
+  // пришедший после неё номер — наш собственный. Принимаем его молча: круги
+  // к этому моменту уже приведены в порядок локально, и стирать их нельзя.
+  let swGenAdoptNext = false;
   let swUiState      = 0;   // что показываем сейчас: 0=idle, 1=running, 2=paused
   let swMuteUntil    = 0;   // после своей команды даём устройству догнать нас
   let swPingSeq      = 0;
@@ -1451,7 +1458,8 @@
   function swSend(cmd) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(cmd);
-    swMuteUntil = performance.now() + SW_MUTE_MS;
+    swMuteUntil    = performance.now() + SW_MUTE_MS;
+    swGenAdoptNext = true;
     return true;
   }
 
@@ -1527,9 +1535,17 @@
   // Точную подстройку ведёт ping/pong, здесь ловим только развал состояния
   // (сброс с другой вкладки, ребут часов). На паузе счётчик заморожен,
   // поэтому опоздавший фрейм всё равно несёт точное значение.
-  function syncStopwatch(state, ms) {
+  //
+  // Смену номера замера ловим наравне с состоянием: сброс и повторный старт
+  // между двумя кадрами оставляют state тем же (1), и без этой проверки вкладка
+  // продолжала бы считать старый замер вместе с его кругами.
+  function syncStopwatch(state, ms, gen) {
     if (performance.now() < swMuteUntil) return;
-    if (state !== swUiState) { adoptStopwatch(state, ms); return; }
+    if (gen !== undefined && swGenAdoptNext) { swGen = gen; swGenAdoptNext = false; }
+    if (state !== swUiState || (gen !== undefined && gen !== swGen)) {
+      adoptStopwatch(state, ms, gen);
+      return;
+    }
     if (state === 2 && Math.abs(ms - swAccum) >= SW_DEADBAND_MS) {
       swAccum = ms;
       swRender(ms);
@@ -1540,11 +1556,25 @@
   }
 
   // state: 0=idle, 1=running, 2=paused
-  function adoptStopwatch(state, ms) {
+  //
+  // gen — номер замера с устройства; undefined, когда его неоткуда взять
+  // (ответ на ping такого поля не несёт), и тогда замер считается тем же.
+  //
+  // Круги принадлежат замеру, а не соединению. Раньше эта функция чистила их
+  // всегда, а вызывалась в том числе на первом кадре после каждого
+  // переподключения — трёхсекундный обрыв посреди замера уносил всё записанное.
+  // Теперь чистим, только когда замер действительно другой: устройство в
+  // простое (сброс) или номер замера сменился.
+  function adoptStopwatch(state, ms, gen) {
     cancelAnimationFrame(swRafId);
-    swLaps = []; swLastLapMs = 0;
+    const newRun = (state === 0) ||
+                   (gen !== undefined && !swGenAdoptNext && gen !== swGen);
+    if (gen !== undefined) { swGen = gen; swGenAdoptNext = false; }
+    if (newRun) {
+      swLaps = []; swLastLapMs = 0;
+      document.getElementById('sw-laps').innerHTML = '';
+    }
     swUiState = (state === 1 || state === 2) ? state : 0;
-    document.getElementById('sw-laps').innerHTML = '';
     const startBtn = document.getElementById('sw-start-btn');
     const lapBtn   = document.getElementById('sw-lap-btn');
 

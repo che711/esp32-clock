@@ -90,6 +90,7 @@ static void buildJson(char* buf, size_t sz) {
         "\"screen_peek\":%lu,"
         "\"sw_state\":%d,"
         "\"sw_ms\":%lu,"
+        "\"sw_gen\":%lu,"
         "\"bmp_valid\":%s,"
         "\"bmp_temp\":%.2f,"
         "\"pressure\":%.2f,"
@@ -122,6 +123,7 @@ static void buildJson(char* buf, size_t sz) {
         (unsigned long)screenPeekLeftS(),
         (int)stopwatch.state,
         (unsigned long)stopwatch.elapsed(millis()),
+        (unsigned long)stopwatch.gen,
         weather.valid ? "true" : "false",
         weather.temperature,
         weather.pressure,
