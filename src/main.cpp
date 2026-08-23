@@ -208,31 +208,71 @@ void swReset() {
 }
 
 // ─── WiFi + NTP ───────────────────────────────────────────
-static void connectWifi() {
+//
+//  Подключение — автомат, а не цикл с delay() внутри. Ассоциация занимает
+//  секунды, а из loop() она вызывается на возврате из выживания: пока
+//  connectWifi() крутил свои 30 × delay(500), вставало всё — часы, секундомер,
+//  веб и опрос датчика, до пятнадцати секунд разом.
+//
+//  Наружу торчат два вызова: wifiBeginConnect() начинает, wifiConnectStep()
+//  двигает на один шаг и говорит, закончилось ли. Вся работа «после связи»
+//  собрана в wifiOnConnected(), чтобы не разъезжалась между путями.
+static bool     wifiConnecting   = false;
+static uint32_t wifiConnectStart = 0;
+static uint32_t wifiDotMs        = 0;   // ритм точек в логе, раз в 500 мс
+// Отработала ли wifiOnConnected() для текущей ассоциации. Связь поднимается не
+// только через автомат: setAutoReconnect(true) и WiFi.reconnect() возвращают её
+// сами, мимо него. Без этого признака после такого возврата не было бы ни
+// mDNS, ни настроек радио под профиль — то есть clock.local молчал бы до ребута.
+static bool     wifiReady        = false;
+
+static void wifiOnConnected() {
+    wifiReady = true;
+    localIP = WiFi.localIP().toString();
+    Serial.printf("\nIP: %s\n", localIP.c_str());
+    // Пока идёт замер секундомера, сон радио выключен ради точности отсчёта
+    // (см. setRadioSaving) — реконнект посреди замера включать его обратно
+    // не должен. Ровно та же оговорка, что и в powerApplyRadio().
+    if (stopwatch.idle()) setRadioSaving(true);
+    powerApplyRadio();          // мощность и listen_interval под режим
+    // end() перед begin(): сюда заходят и повторно — после возврата из
+    // выживания, где радио выключалось вместе с ответчиком mDNS.
+    MDNS.end();
+    if (MDNS.begin(DEVICE_HOSTNAME)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
+    }
+}
+
+static void wifiBeginConnect() {
     Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(DEVICE_HOSTNAME);
     WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    uint8_t tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 30) {
-        delay(500); Serial.print("."); tries++;
-    }
+    wifiConnecting   = true;
+    wifiReady        = false;
+    wifiConnectStart = millis();
+    wifiDotMs        = wifiConnectStart;
+}
+
+// true — подключение больше не в процессе: либо связь есть, либо вышло время.
+// Промах не страшен: обычная проверка связи раз в 10 с сделает WiFi.reconnect().
+static bool wifiConnectStep(uint32_t now) {
+    if (!wifiConnecting) return true;
+
     if (WiFi.status() == WL_CONNECTED) {
-        localIP = WiFi.localIP().toString();
-        Serial.printf("\nIP: %s\n", localIP.c_str());
-        setRadioSaving(true);
-        powerApplyRadio();          // мощность и listen_interval под режим
-        // end() перед begin(): сюда заходят и повторно — после возврата из
-        // выживания, где радио выключалось вместе с ответчиком mDNS.
-        MDNS.end();
-        if (MDNS.begin(DEVICE_HOSTNAME)) {
-            MDNS.addService("http", "tcp", 80);
-            Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
-        }
-    } else {
-        Serial.println("\nWiFi FAILED");
+        wifiConnecting = false;
+        wifiOnConnected();
+        return true;
     }
+    if (now - wifiDotMs >= 500) { wifiDotMs = now; Serial.print("."); }
+    if (now - wifiConnectStart >= WIFI_CONNECT_TIMEOUT_MS) {
+        wifiConnecting = false;
+        Serial.println("\nWiFi FAILED");
+        return true;
+    }
+    return false;
 }
 
 // Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
@@ -278,7 +318,8 @@ static void radioOff(const char* why) {
     if (WiFi.getMode() == WIFI_OFF) return;
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    localIP = "";
+    wifiReady = false;
+    localIP   = "";
     Serial.printf("Power: WiFi off (%s)\n", why);
 }
 
@@ -314,22 +355,35 @@ static void maintainNetwork() {
     static uint32_t lastCheck = 0;
     uint32_t now = millis();
 
-    if (!powerWifiWanted()) { maintainSurvivalRadio(now); return; }
+    if (!powerWifiWanted()) {
+        wifiConnecting = false;      // выживание отменяет начатую попытку
+        maintainSurvivalRadio(now);
+        return;
+    }
+
+    // Пока идёт ассоциация — только двигаем автомат. Проверять связь и
+    // ре-синкать NTP посреди подключения нечего.
+    if (wifiConnecting) { wifiConnectStep(now); return; }
 
     // Вернулись из выживания — радио надо поднять заново. Случай ntpWaking
     // отдельно: там радио уже в STA, и без этой ветки соединение осталось бы
     // недоделанным — без localIP и без mDNS, то есть дашборд не найти.
     if (WiFi.getMode() == WIFI_OFF || ntpWaking) {
         ntpWaking = false;
-        connectWifi();
+        wifiBeginConnect();
         return;
     }
 
     if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
         lastCheck = now;
         if (WiFi.status() != WL_CONNECTED) {
+            wifiReady = false;
             Serial.println("WiFi lost -> reconnect");
             WiFi.reconnect();
+        } else if (!wifiReady) {
+            // Связь вернулась мимо автомата — авто-реконнектом стека или
+            // предыдущим WiFi.reconnect(). Доводим её до конца тем же путём.
+            wifiOnConnected();
         }
         String ip = WiFi.localIP().toString();
         if (ip != localIP) localIP = ip;
@@ -453,7 +507,11 @@ void setup() {
     displayBegin();
     displaySplash("Connecting WiFi...");
 
-    connectWifi();
+    // В setup() ждём связь на месте: показывать всё равно нечего — на экране
+    // заставка, — а syncNTP() ниже без сети бессмысленна. Автомат тот же, что
+    // крутится в loop(), просто здесь его прокачиваем сами.
+    wifiBeginConnect();
+    while (!wifiConnectStep(millis())) delay(50);
     syncNTP();
     powerBegin();          // профиль применяем, когда экран и радио уже есть
 
