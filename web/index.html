@@ -35,6 +35,10 @@
     --info:        #6b9bff;
     --track:       #1c2537;
     --code:        #9dbdff;
+    /* Подложки состояний: тем же цветом, но так, чтобы текст поверх читался */
+    --good-soft:   rgba(92,195,137,0.13);
+    --warn-soft:   rgba(233,165,74,0.15);
+    --crit-soft:   rgba(239,106,85,0.16);
     --shadow:      0 20px 50px rgba(0,0,0,0.45);
     --card-shadow: 0 16px 34px rgba(0,0,0,0.42);
 
@@ -88,6 +92,9 @@
     --info:        #4f6ae0;
     --track:       #ded9f0;
     --code:        #4b3fb0;
+    --good-soft:   rgba(30,158,106,0.12);
+    --warn-soft:   rgba(192,123,18,0.14);
+    --crit-soft:   rgba(217,72,58,0.13);
     --shadow:      0 18px 42px rgba(60,45,140,0.16);
     --card-shadow: 0 14px 32px rgba(60,45,140,0.22);
 
@@ -410,9 +417,35 @@
                border: 2px solid var(--text-faint); border-radius: 4px; padding: 2px; }
   .batt-icon::after { content: ''; position: absolute; right: -5px; top: 4.5px;
                       width: 3px; height: 6px; background: var(--text-faint); border-radius: 0 2px 2px 0; }
-  .batt-fill { height: 100%; width: 0%; border-radius: 2px; background: var(--good);
+  .batt-fill { height: 100%; width: 0%; border-radius: 2px; background: var(--text-faint);
                transition: width 0.8s ease, background 0.3s; }
-  .batt-fill.warn { background: var(--warn); } .batt-fill.crit { background: var(--crit); }
+
+  /* Состояние заряда красит плитку целиком, а не только заливку иконки.
+     Раньше цвет менялся у одной полоски шириной 32 px — заметить её краем
+     глаза было невозможно, а именно для этого индикатор и нужен.
+     Пороги приходят с устройства (bat_warn_pct / bat_crit_pct), поэтому
+     дашборд и экран часов зажигают тревогу одновременно. */
+  #bat-tile { transition: background 0.4s, box-shadow 0.4s; }
+  #bat-tile .kv-big, #bat-tile .batt-icon,
+  #bat-tile .batt-icon::after { transition: color 0.3s, border-color 0.3s, background 0.3s; }
+
+  #bat-tile.bat-good .batt-fill { background: var(--good); }
+  #bat-tile.bat-warn .batt-fill { background: var(--warn); }
+  #bat-tile.bat-crit .batt-fill { background: var(--crit); }
+
+  #bat-tile.bat-good #bat-pct { color: var(--good); }
+  #bat-tile.bat-warn #bat-pct { color: var(--warn); }
+  #bat-tile.bat-crit #bat-pct { color: var(--crit); }
+
+  /* Подложку и полосу слева зажигаем только на тревоге: зелёная заливка
+     всегда — это шум, от которого предупреждение перестаёт бросаться в глаза.
+     box-shadow, а не border-left: рамка сдвинула бы содержимое плитки. */
+  #bat-tile.bat-warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
+  #bat-tile.bat-crit { background: var(--crit-soft); box-shadow: inset 3px 0 0 var(--crit); }
+  #bat-tile.bat-warn .batt-icon { border-color: var(--warn); }
+  #bat-tile.bat-crit .batt-icon { border-color: var(--crit); }
+  #bat-tile.bat-warn .batt-icon::after { background: var(--warn); }
+  #bat-tile.bat-crit .batt-icon::after { background: var(--crit); }
   .kv-big { font-family: var(--font-mono); font-size: 17px; font-weight: 600; }
   .kv-note { font-size: 10.5px; color: var(--text-faint); }
 
@@ -1446,14 +1479,28 @@
     // Плитка не прячется никогда, даже когда банки нет. Исчезающая плитка
     // перекраивает сетку и читается как поломка дашборда, а не как «питание
     // от USB»; вместо этого показываем прочерк и то, что реально намерилось.
+    const tile = document.getElementById('bat-tile');
     const bf   = document.getElementById('bat-fill');
     const note = document.getElementById('bat-note');
     const mah = document.getElementById('bat-mah');
+
+    // Состояние плитки — по тем же порогам, по которым часы зажигают
+    // перечёркнутую батарею и гасят экран. Пороги приходят в снимке, а не
+    // зашиты здесь: копия неизбежно разъезжается с прошивкой, как разъехалось
+    // прежнее «< 30 %» после правки кривой. Значения по умолчанию — только
+    // на случай снимка от старой прошивки.
+    const warnAt = d.bat_warn_pct !== undefined ? d.bat_warn_pct : 20;
+    const critAt = d.bat_crit_pct !== undefined ? d.bat_crit_pct : 5;
+    const batState = !d.bat_valid ? (d.bat_state === 'over' ? 'crit' : 'none')
+                   : d.bat_pct <= critAt ? 'crit'
+                   : d.bat_pct <= warnAt ? 'warn'
+                   : 'good';
+    tile.className = 'tile bat-' + batState;
+
     if (d.bat_valid) {
       document.getElementById('bat-pct').textContent = d.bat_pct;
       document.getElementById('bat-v').textContent   = d.bat_v.toFixed(2);
       bf.style.width = d.bat_pct + '%';
-      bf.className   = 'batt-fill' + (d.bat_low ? ' crit' : d.bat_pct < 30 ? ' warn' : '');
       note.textContent = 'battery';
       // Знак «≈» не украшение: мА·ч тут не мерены, а пересчитаны из
       // напряжения — кулоновского счётчика на плате нет.
@@ -1469,7 +1516,7 @@
       bf.style.width = '0%';
       // Превышение — не «банки нет»: на линии банки что-то постороннее,
       // и подпись должна звать смотреть схему, а не списывать на USB.
-      bf.className     = 'batt-fill' + (over ? ' crit' : '');
+      // Цвет плитки этот случай уже отразил, здесь остаётся подпись.
       note.textContent = over ? 'over-voltage' : raw > 0.05 ? 'no battery · raw' : 'no battery';
       mah.textContent  = '';
     }

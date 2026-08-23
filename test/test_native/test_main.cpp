@@ -416,17 +416,21 @@ void test_battery_below_empty() {
     TEST_ASSERT_EQUAL_UINT8(0, batteryVoltageToPercent(2.50f));
 }
 
+// Узловая точка кривой. 3.82 В — середина плато, и после подъёма нуля до
+// 3.65 В она означает уже 46 %, а не 50: шкала та же ёмкость раскладывает
+// на более короткий диапазон напряжений.
 void test_battery_curve_point() {
-    TEST_ASSERT_EQUAL_UINT8(50, batteryVoltageToPercent(3.82f));
+    TEST_ASSERT_EQUAL_UINT8(46, batteryVoltageToPercent(3.82f));
 }
 
-// Ноль шкалы — на отсечке устройства, а не элемента: ниже ~3.55 В диод и LDO
-// уже не держат 3.3 В, и оставшаяся ёмкость банки этим часам недоступна
-void test_battery_curve_tail_matches_cutoff() {
-    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.68f));
-    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.60f));
-    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.50f));
-    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.45f));
+// Ноль шкалы поднят до 3.65 В ради ресурса банки: глубокий разряд Li-ion
+// стоит циклов, а железо всё равно живёт до ~3.55 В — запас остаётся
+void test_battery_curve_zero_protects_the_cell() {
+    TEST_ASSERT_EQUAL_UINT8(0, batteryVoltageToPercent(3.65f));
+    TEST_ASSERT_EQUAL_UINT8(0, batteryVoltageToPercent(3.60f));
+    TEST_ASSERT_EQUAL_UINT8(0, batteryVoltageToPercent(3.50f));
+    // ...и остаётся ненулевой над порогом — иначе шкала обрывалась бы раньше
+    TEST_ASSERT_TRUE(batteryVoltageToPercent(3.66f) > 0);
 }
 
 // Хвост должен быть растянут, а не поджат: на пункт шкалы внизу приходится
@@ -437,7 +441,7 @@ void test_battery_curve_tail_matches_cutoff() {
 // и растягивать её было бы не честнее, а наоборот.
 void test_battery_tail_is_not_steeper_than_adc_noise() {
     const int NOISE_MV = 4;              // шум медианы набора — единицы мВ
-    for (int mv = 3500; mv + NOISE_MV <= 3740; mv++) {
+    for (int mv = 3650; mv + NOISE_MV <= 3740; mv++) {
         uint8_t lo = batteryVoltageToPercent(mv / 1000.0f);
         uint8_t hi = batteryVoltageToPercent((mv + NOISE_MV) / 1000.0f);
         TEST_ASSERT_TRUE_MESSAGE(hi - lo <= 1,
@@ -445,9 +449,9 @@ void test_battery_tail_is_not_steeper_than_adc_noise() {
     }
 }
 
-// Середина отрезка 3.68В(10%)…3.74В(20%) — проверяем интерполяцию
+// Середина отрезка 3.70В(5%)…3.74В(13%) — проверяем интерполяцию
 void test_battery_interpolation() {
-    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));
+    TEST_ASSERT_UINT8_WITHIN(1, 9, batteryVoltageToPercent(3.72f));
 }
 
 // Рубежи заданы в процентах, но настраивались по напряжению. Кривая и
@@ -455,8 +459,11 @@ void test_battery_interpolation() {
 // отсечки железа (~3.55 В). Режимов среди рубежей больше нет — заряд трогает
 // только экран и предупреждение.
 void test_battery_thresholds_land_where_intended() {
-    TEST_ASSERT_EQUAL_UINT8(20, batteryVoltageToPercent(3.74f));  // BATTERY_CRITICAL_PCT
-    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.60f));  // POWER_SCREEN_OFF_PCT
+    // POWER_SCREEN_OFF_PCT = 5 % должен приходиться ровно на 3.70 В: панель
+    // снимается с банки там, а не на 3.60, как было с прежним нулём
+    TEST_ASSERT_EQUAL_UINT8(5, batteryVoltageToPercent(3.70f));
+    // BATTERY_CRITICAL_PCT = 20 % — перечёркнутая батарея, около 3.76 В
+    TEST_ASSERT_UINT8_WITHIN(1, 20, batteryVoltageToPercent(3.76f));
 }
 
 // Кривая обязана быть монотонной: выше напряжение — не меньше процент
@@ -470,18 +477,16 @@ void test_battery_monotonic() {
     TEST_ASSERT_EQUAL_UINT8(100, prev);
 }
 
-// Пересчёт процентов в мА·ч. Шкала идёт по доступной ёмкости, а не по
-// паспортной: сотня — это полный бак этих часов (~2600 мА·ч), а не полная
-// банка (~3300). Остальные ~700 лежат ниже отсечки 3.5 В.
+// Пересчёт процентов в мА·ч: сотня шкалы — это вся доступная ёмкость
 void test_battery_mah_scale_is_usable_capacity() {
-    TEST_ASSERT_EQUAL_UINT16(2600, batteryRemainingMah(100, 2600));
-    TEST_ASSERT_EQUAL_UINT16(1300, batteryRemainingMah(50,  2600));
-    TEST_ASSERT_EQUAL_UINT16(0,    batteryRemainingMah(0,   2600));
+    TEST_ASSERT_EQUAL_UINT16(3300, batteryRemainingMah(100, 3300));
+    TEST_ASSERT_EQUAL_UINT16(1650, batteryRemainingMah(50,  3300));
+    TEST_ASSERT_EQUAL_UINT16(0,    batteryRemainingMah(0,   3300));
 }
 
 // Битый процент выше сотни не должен давать больше полной банки
 void test_battery_mah_clamps_above_full() {
-    TEST_ASSERT_EQUAL_UINT16(2600, batteryRemainingMah(200, 2600));
+    TEST_ASSERT_EQUAL_UINT16(3300, batteryRemainingMah(200, 3300));
 }
 
 void test_battery_plausible_usb() {
@@ -732,6 +737,45 @@ void test_power_screen_on_at_night_while_stopwatch_runs() {
     // Без замера тот же час экран гасит — правило именно про замер
     TEST_ASSERT_FALSE(powerScreenAllowed(
         powerEffectiveMode(POWER_ECO, false), 3, 6, 22));
+}
+
+// ─── Глубокий сон на пустой банке ─────────────────────────
+// Ноль шкалы — команда «стоп»: ниже него часы перестают тянуть из элемента
+void test_power_sleeps_at_zero() {
+    TEST_ASSERT_TRUE (powerShouldSleep(0, true, 0));
+    TEST_ASSERT_FALSE(powerShouldSleep(1, true, 0));
+    TEST_ASSERT_FALSE(powerShouldSleep(50, true, 0));
+}
+
+// На USB процентов нет — усыплять не за что, иначе часы без батареи
+// уснули бы навсегда
+void test_power_never_sleeps_without_battery() {
+    TEST_ASSERT_FALSE(powerShouldSleep(0, false, 0));
+}
+
+// Порог пробуждения выше порога засыпания, и это обязательно: во сне банка
+// отдыхает и напряжение подрастает само. Без запаса часы вставали бы на этом
+// отскоке, тут же садились и грузились по кругу.
+void test_power_wake_threshold_has_margin() {
+    TEST_ASSERT_FALSE(powerShouldWake(0,  true, 10));   // заснули здесь
+    TEST_ASSERT_FALSE(powerShouldWake(5,  true, 10));   // отскок — мало
+    TEST_ASSERT_FALSE(powerShouldWake(9,  true, 10));
+    TEST_ASSERT_TRUE (powerShouldWake(10, true, 10));   // зарядка — встаём
+    TEST_ASSERT_TRUE (powerShouldWake(80, true, 10));
+}
+
+// Батарею вынули во сне и включили от USB — надо вставать, а не спать дальше
+void test_power_wakes_when_battery_gone() {
+    TEST_ASSERT_TRUE(powerShouldWake(0, false, 10));
+}
+
+// Пороги не должны пересечься: сон строго ниже пробуждения, иначе цикл
+void test_power_sleep_and_wake_do_not_overlap() {
+    for (uint8_t pct = 0; pct <= 100; pct++) {
+        bool sleeps = powerShouldSleep(pct, true, 0);
+        bool wakes  = powerShouldWake(pct, true, 10);
+        TEST_ASSERT_FALSE_MESSAGE(sleeps && wakes, "заряд и усыпляет, и будит");
+    }
 }
 
 void test_power_mode_from_name() {
@@ -1037,7 +1081,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_empty);
     RUN_TEST(test_battery_below_empty);
     RUN_TEST(test_battery_curve_point);
-    RUN_TEST(test_battery_curve_tail_matches_cutoff);
+    RUN_TEST(test_battery_curve_zero_protects_the_cell);
     RUN_TEST(test_battery_tail_is_not_steeper_than_adc_noise);
     RUN_TEST(test_battery_interpolation);
     RUN_TEST(test_battery_thresholds_land_where_intended);
@@ -1084,6 +1128,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_hold_happens_only_under_stopwatch);
     RUN_TEST(test_power_stopwatch_lifts_schedule_not_brightness);
     RUN_TEST(test_power_screen_on_at_night_while_stopwatch_runs);
+    RUN_TEST(test_power_sleeps_at_zero);
+    RUN_TEST(test_power_never_sleeps_without_battery);
+    RUN_TEST(test_power_wake_threshold_has_margin);
+    RUN_TEST(test_power_wakes_when_battery_gone);
+    RUN_TEST(test_power_sleep_and_wake_do_not_overlap);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
     RUN_TEST(test_power_mode_from_name_rejects_removed_survival);
