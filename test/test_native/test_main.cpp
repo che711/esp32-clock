@@ -450,13 +450,13 @@ void test_battery_interpolation() {
     TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));
 }
 
-// Пороги режимов заданы в процентах, но настраивались по напряжению.
-// Кривая и config.h должны сходиться: радио выключается раньше экрана,
-// и оба рубежа — выше отсечки железа.
+// Рубежи заданы в процентах, но настраивались по напряжению. Кривая и
+// config.h должны сходиться: предупреждение раньше гашения, и оба выше
+// отсечки железа (~3.55 В). Режимов среди рубежей больше нет — заряд трогает
+// только экран и предупреждение.
 void test_battery_thresholds_land_where_intended() {
-    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));  // survival
-    TEST_ASSERT_EQUAL_UINT8(5,      batteryVoltageToPercent(3.60f));  // экран прочь
-    TEST_ASSERT_EQUAL_UINT8(20,     batteryVoltageToPercent(3.74f));  // BATTERY_LOW_V
+    TEST_ASSERT_EQUAL_UINT8(20, batteryVoltageToPercent(3.74f));  // BATTERY_CRITICAL_PCT
+    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.60f));  // POWER_SCREEN_OFF_PCT
 }
 
 // Кривая обязана быть монотонной: выше напряжение — не меньше процент
@@ -608,67 +608,20 @@ void test_drive_registers_in_range() {
     }
 }
 
-// ─── Энергосбережение: автоматический выбор режима ───────
-// Порядок аргументов длинный, поэтому обёртка: заряд 80 %, банка есть,
-// порог выживания 10 %, гистерезис 5 %.
-static PowerMode autoMode(PowerMode cur, bool sw,
-                          uint8_t pct = 80, bool valid = true) {
-    return powerAutoMode(cur, sw, pct, valid, 10, 5);
-}
-
-// Без секундомера и при живом заряде базовый режим — эконом, а не обычный
-void test_auto_idle_is_eco() {
-    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_ECO, false));
-    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_SURVIVAL, false));
-}
-
-void test_auto_stopwatch_raises_to_normal() {
-    TEST_ASSERT_EQUAL(POWER_NORMAL, autoMode(POWER_ECO, true));
-}
-
-// Секундомер главнее низкого заряда — иначе замер оборвался бы на середине
-void test_auto_stopwatch_beats_low_charge() {
-    TEST_ASSERT_EQUAL(POWER_NORMAL, autoMode(POWER_SURVIVAL, true, 4));
-}
-
-// Заряд на исходе — выживание в любое время суток
-void test_auto_low_charge_is_survival() {
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_ECO, false, 10));
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_ECO, false, 3));
-}
-
-void test_auto_charge_hysteresis() {
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_SURVIVAL, false, 12));
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, autoMode(POWER_SURVIVAL, false, 14));
-    TEST_ASSERT_EQUAL(POWER_ECO,      autoMode(POWER_SURVIVAL, false, 15));
-}
-
-// На USB заряда не знаем — правило по заряду не применяем, остаёмся в экономе
-void test_auto_usb_ignores_charge_rule() {
-    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_ECO, false, 0, false));
-    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_SURVIVAL, false, 0, false));
-}
-
-// Ночь на режим не влияет: экран гасит расписание, Wi-Fi остаётся поднятым,
-// иначе ночью не запустить секундомер и не открыть дашборд
-void test_auto_night_stays_eco() {
-    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_ECO, false));
-    TEST_ASSERT_EQUAL(POWER_ECO, autoMode(POWER_SURVIVAL, false));
-}
-
 // ─── Энергосбережение: профили и расписание ──────────────
 void test_power_profile_names() {
-    TEST_ASSERT_EQUAL_STRING("normal",   powerProfile(POWER_NORMAL).name);
-    TEST_ASSERT_EQUAL_STRING("eco",      powerProfile(POWER_ECO).name);
-    TEST_ASSERT_EQUAL_STRING("survival", powerProfile(POWER_SURVIVAL).name);
+    TEST_ASSERT_EQUAL_STRING("normal", powerProfile(POWER_NORMAL).name);
+    TEST_ASSERT_EQUAL_STRING("eco",    powerProfile(POWER_ECO).name);
 }
 
 void test_power_profile_tightens_with_level() {
     TEST_ASSERT_TRUE(powerProfile(POWER_ECO).sensorMs > powerProfile(POWER_NORMAL).sensorMs);
-    TEST_ASSERT_TRUE(powerProfile(POWER_SURVIVAL).sensorMs > powerProfile(POWER_ECO).sensorMs);
     TEST_ASSERT_TRUE(powerProfile(POWER_ECO).contrastPct < powerProfile(POWER_NORMAL).contrastPct);
-    TEST_ASSERT_TRUE(powerProfile(POWER_NORMAL).wifi);
-    TEST_ASSERT_FALSE(powerProfile(POWER_SURVIVAL).wifi);
+    TEST_ASSERT_TRUE(powerProfile(POWER_ECO).listenInterval > powerProfile(POWER_NORMAL).listenInterval);
+    TEST_ASSERT_TRUE(powerProfile(POWER_ECO).txDbm < powerProfile(POWER_NORMAL).txDbm);
+    // Ночное окно — только у эконома: обычный уровень горит круглые сутки
+    TEST_ASSERT_TRUE(powerProfile(POWER_ECO).screenWindow);
+    TEST_ASSERT_FALSE(powerProfile(POWER_NORMAL).screenWindow);
 }
 
 void test_power_profile_bad_index_is_normal() {
@@ -734,23 +687,41 @@ void test_power_screen_critical_and_schedule_combine() {
     TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 4, true, 5));
 }
 
-// Секундомер поднимает уровень поверх ручной фиксации: замер запускают,
-// чтобы на него смотреть, а зафиксированный эконом ночью гасит экран.
-void test_power_effective_mode_stopwatch_beats_manual_eco() {
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_ECO, true));
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_SURVIVAL, true));
+// Секундомер поднимает уровень поверх выбранного: замер запускают, чтобы на
+// него смотреть, а зафиксированный эконом ночью гасит экран по расписанию.
+void test_power_stopwatch_beats_choice() {
+    TEST_ASSERT_EQUAL(POWER_NORMAL, powerEffectiveMode(POWER_ECO, true));
+    TEST_ASSERT_EQUAL(POWER_NORMAL, powerEffectiveMode(POWER_NORMAL, true));
 }
 
-// Выбор пользователя не теряется — он возвращается со сбросом замера
-void test_power_effective_mode_restores_choice() {
-    TEST_ASSERT_EQUAL_INT(POWER_ECO,      powerEffectiveMode(POWER_ECO, false));
-    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL, powerEffectiveMode(POWER_SURVIVAL, false));
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,   powerEffectiveMode(POWER_NORMAL, false));
+// Выбор не теряется — он возвращается со сбросом замера
+void test_power_choice_restored_after_stopwatch() {
+    TEST_ASSERT_EQUAL(POWER_ECO,    powerEffectiveMode(POWER_ECO, false));
+    TEST_ASSERT_EQUAL(POWER_NORMAL, powerEffectiveMode(POWER_NORMAL, false));
 }
 
-// В «обычном» поднимать нечего — фиксации не возникает
-void test_power_effective_mode_normal_is_not_pinned() {
-    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_NORMAL, true));
+// Расхождение «выбрано / работает» бывает ровно в одном случае, и это замер:
+// заряд режим больше не выбирает, третьего уровня нет
+void test_power_hold_happens_only_under_stopwatch() {
+    TEST_ASSERT_TRUE (powerEffectiveMode(POWER_ECO,    true)  != POWER_ECO);
+    TEST_ASSERT_TRUE (powerEffectiveMode(POWER_ECO,    false) == POWER_ECO);
+    TEST_ASSERT_TRUE (powerEffectiveMode(POWER_NORMAL, true)  == POWER_NORMAL);
+}
+
+// Замер поднимает уровень ради расписания экрана — и только ради него.
+// Яркость должна остаться от выбранного уровня: панель крупнейший потребитель,
+// и полные 100 % масштаба ехали прицепом, ничего не добавляя к читаемости.
+// Тест держит оба конца связки: окно снимается, а масштаб яркости расходится.
+void test_power_stopwatch_lifts_schedule_not_brightness() {
+    const PowerMode chosen  = POWER_ECO;
+    const PowerMode running = powerEffectiveMode(chosen, true);
+
+    TEST_ASSERT_EQUAL(POWER_NORMAL, running);
+    TEST_ASSERT_FALSE(powerProfile(running).screenWindow);   // ночное окно снято
+    // ...а масштаб яркости обязан отличаться, иначе экономить нечего
+    TEST_ASSERT_TRUE(powerProfile(chosen).contrastPct < powerProfile(running).contrastPct);
+    TEST_ASSERT_EQUAL_UINT8(60,  powerProfile(chosen).contrastPct);
+    TEST_ASSERT_EQUAL_UINT8(100, powerProfile(running).contrastPct);
 }
 
 // Экран под замером горит в любой час: профиль «обычный» окна не знает
@@ -759,16 +730,16 @@ void test_power_screen_on_at_night_while_stopwatch_runs() {
     TEST_ASSERT_TRUE(powerScreenAllowed(m, 3, 6, 22));    // 03:00, ночь
     TEST_ASSERT_TRUE(powerScreenAllowed(m, 23, 6, 22));   // 23:00
     // Без замера тот же час экран гасит — правило именно про замер
-    TEST_ASSERT_FALSE(powerScreenAllowed(powerEffectiveMode(POWER_ECO, false),
-                                         3, 6, 22));
+    TEST_ASSERT_FALSE(powerScreenAllowed(
+        powerEffectiveMode(POWER_ECO, false), 3, 6, 22));
 }
 
 void test_power_mode_from_name() {
     PowerMode m = POWER_NORMAL;
-    TEST_ASSERT_TRUE(powerModeFromName("survival", &m));
-    TEST_ASSERT_EQUAL(POWER_SURVIVAL, m);
     TEST_ASSERT_TRUE(powerModeFromName("eco", &m));
     TEST_ASSERT_EQUAL(POWER_ECO, m);
+    TEST_ASSERT_TRUE(powerModeFromName("normal", &m));
+    TEST_ASSERT_EQUAL(POWER_NORMAL, m);
 }
 
 void test_power_mode_from_name_rejects_garbage() {
@@ -777,6 +748,14 @@ void test_power_mode_from_name_rejects_garbage() {
     TEST_ASSERT_FALSE(powerModeFromName("", &m));
     TEST_ASSERT_FALSE(powerModeFromName(nullptr, &m));
     TEST_ASSERT_EQUAL(POWER_ECO, m);              // при отказе не трогаем
+}
+
+// Убранный уровень не должен вернуться опечаткой в конфиге или запросом из
+// браузера: имени "survival" больше нет, и API обязан его отвергнуть
+void test_power_mode_from_name_rejects_removed_survival() {
+    PowerMode m = POWER_ECO;
+    TEST_ASSERT_FALSE(powerModeFromName("survival", &m));
+    TEST_ASSERT_EQUAL(POWER_ECO, m);
 }
 
 // ─── Метео: производные ───────────────────────────────────
@@ -1087,13 +1066,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_drive_midpoint_is_gamma_corrected);
     RUN_TEST(test_drive_registers_in_range);
 
-    RUN_TEST(test_auto_idle_is_eco);
-    RUN_TEST(test_auto_stopwatch_raises_to_normal);
-    RUN_TEST(test_auto_stopwatch_beats_low_charge);
-    RUN_TEST(test_auto_low_charge_is_survival);
-    RUN_TEST(test_auto_charge_hysteresis);
-    RUN_TEST(test_auto_usb_ignores_charge_rule);
-    RUN_TEST(test_auto_night_stays_eco);
     RUN_TEST(test_power_profile_names);
     RUN_TEST(test_power_profile_tightens_with_level);
     RUN_TEST(test_power_profile_bad_index_is_normal);
@@ -1107,12 +1079,14 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_screen_ignores_critical_without_battery);
     RUN_TEST(test_power_screen_battery_gate_needs_no_hour);
     RUN_TEST(test_power_screen_critical_and_schedule_combine);
-    RUN_TEST(test_power_effective_mode_stopwatch_beats_manual_eco);
-    RUN_TEST(test_power_effective_mode_restores_choice);
-    RUN_TEST(test_power_effective_mode_normal_is_not_pinned);
+    RUN_TEST(test_power_stopwatch_beats_choice);
+    RUN_TEST(test_power_choice_restored_after_stopwatch);
+    RUN_TEST(test_power_hold_happens_only_under_stopwatch);
+    RUN_TEST(test_power_stopwatch_lifts_schedule_not_brightness);
     RUN_TEST(test_power_screen_on_at_night_while_stopwatch_runs);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
+    RUN_TEST(test_power_mode_from_name_rejects_removed_survival);
 
     RUN_TEST(test_pressure_mmhg);
     RUN_TEST(test_qnh_at_sea_level);

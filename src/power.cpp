@@ -7,22 +7,15 @@
 #include <esp_wifi.h>
 
 // ============================================================
-//  power.cpp — состояние режима и его применение к железу.
+//  power.cpp — состояние уровня и его применение к железу.
 // ============================================================
 
-static PowerMode mode   = POWER_NORMAL;
-static bool      autoBy = POWER_AUTO_DEFAULT;
-
-// Уровень, выбранный руками. Отдельно от mode, потому что эти двое расходятся
-// на время замера: секундомер поднимает mode до обычного независимо от того,
-// что зафиксировал пользователь, а сам выбор ждёт сброса (powerEffectiveMode).
-static PowerMode chosen  = POWER_NORMAL;
-static bool      swPinned = false;
-
-// Срок ручной фиксации выживания; 0 — фиксации нет. Только у этого режима есть
-// срок: он один выключает радио, а значит и путь обратно (см. config.h).
-// Сравнение со знаковой разностью, поэтому переполнение millis() безопасно.
-static uint32_t  manualSurvivalUntil = 0;
+// Выбор пользователя и то, что работает. Расходятся они ровно в одном случае:
+// на время замера секундомер поднимает уровень до обычного, а выбор ждёт
+// сброса (powerEffectiveMode). Эконом — стартовый уровень: полная мощность
+// нужна, когда с часами работают, а не круглые сутки.
+static PowerMode chosen = POWER_DEFAULT_MODE;
+static PowerMode mode   = POWER_DEFAULT_MODE;
 
 // Мощность передатчика задаётся перечислением, не числом: округляем
 // вниз до ближайшего доступного шага, чтобы профиль оставался просто
@@ -45,14 +38,16 @@ void powerApplyRadio() {
 
     // listen_interval — сколько маячков радио пропускает между
     // пробуждениями. Больше интервал — холоднее радио, но входящий
-    // пакет ждёт дольше. Работает только вместе с MAX_MODEM.
+    // пакет ждёт дольше. Работает при любом modem sleep: под секундомером
+    // профиль normal ставит сюда 1, и вместе с MIN_MODEM это даёт задержку
+    // около десятой секунды.
     wifi_config_t cfg{};
     if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK) {
         cfg.sta.listen_interval = p.listenInterval;
         esp_wifi_set_config(WIFI_IF_STA, &cfg);
     }
-    // Пока идёт замер секундомера, сон радио выключен ради точности отсчёта
-    // (см. setRadioSaving в main.cpp) — обратно его здесь не включаем.
+    // Пока идёт замер, сон ужат до MIN_MODEM ради отзывчивости кнопок
+    // (см. setRadioSaving в main.cpp) — обратно углублять его здесь нельзя.
     if (stopwatch.idle()) esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
 }
 
@@ -60,101 +55,57 @@ void powerApplyRadio() {
 // иначе настройки применит main.cpp через powerApplyRadio() после связи.
 static void applyProfile() {
     const PowerProfile& p = powerProfile(mode);
-    displaySetAutoScale(p.contrastPct);
+
+    // Яркость — единственный параметр, который берётся от ВЫБРАННОГО уровня,
+    // а не от рабочего. Секундомер поднимает уровень до обычного ради одной
+    // вещи: профиль normal не знает ночного окна, и экран перестаёт гаснуть по
+    // расписанию. Полная яркость при этом ехала прицепом — и стоила дороже
+    // всего остального вместе взятого: масштаб 60 % против 100 % по гамме 2.2
+    // это 25 % против 78 % тока панели, то есть разница втрое на крупнейшем
+    // потребителе. Читаемости она не добавляла: эконом-уровень виден прекрасно.
+    displaySetAutoScale(powerProfile(chosen).contrastPct);
     applyAutoBrightness();          // пересчитать контраст под новый масштаб
     powerApplyRadio();
-    Serial.printf("Power mode -> %s (%s)\n", p.name, autoBy ? "auto" : "manual");
+    Serial.printf("Power mode -> %s%s\n", p.name,
+                  mode != chosen ? " (held, stopwatch)" : "");
 }
 
 void powerBegin() {
-    chosen = mode;
     applyProfile();
-}
-
-// Решение автоматики на текущий момент. Время суток здесь не участвует:
-// ночью экран гасит расписание эконома, режим от часа не зависит.
-static PowerMode evaluateAuto() {
-    // Пауза секундомера — тоже работа: замер не окончен.
-    return powerAutoMode(mode, !stopwatch.idle(),
-                         battery.percent, battery.valid,
-                         POWER_SURVIVAL_PCT, POWER_HYSTERESIS_PCT);
 }
 
 void powerLoop() {
-    if (!autoBy) {
-        // Ручная фиксация не отменяет правила «идёт замер — обычный режим»:
-        // секундомер запускают, чтобы на него смотреть, а зафиксированный
-        // эконом ночью держал бы экран погашенным. Выбор пользователя цел,
-        // он лежит в chosen и вернётся, как только замер сбросят.
-        PowerMode want = powerEffectiveMode(chosen, !stopwatch.idle());
-        swPinned = (want != chosen);
-        if (want != mode) {
-            mode = want;
-            applyProfile();
-        }
-
-        if (manualSurvivalUntil == 0) return;
-        if ((int32_t)(millis() - manualSurvivalUntil) < 0) return;
-        Serial.println("Power: manual survival expired -> auto");
-        powerSetAuto();          // он же снимет срок и поднимет радио обратно
-        return;
-    }
-    // Без троттлинга: старт секундомера должен поднимать режим сразу, а не
+    // Без троттлинга: старт секундомера должен поднимать уровень сразу, а не
     // через несколько секунд. Сама проверка — пара сравнений, профиль
-    // применяется только при смене режима.
-    PowerMode next = evaluateAuto();
-    if (next == mode) return;
-    mode     = next;
-    chosen   = next;         // в авто фиксировать нечего: выбор один
-    swPinned = false;
+    // применяется только при смене.
+    PowerMode want = powerEffectiveMode(chosen, !stopwatch.idle());
+    if (want == mode) return;
+    mode = want;
     applyProfile();
 }
 
-PowerMode   powerCurrent()  { return mode; }
-const char* powerModeName() { return powerProfile(mode).name; }
-bool        powerIsAuto()   { return autoBy; }
+PowerMode   powerCurrent()    { return mode; }
+const char* powerModeName()   { return powerProfile(mode).name; }
+PowerMode   powerChosenMode() { return chosen; }
+bool        powerIsHeld()     { return mode != chosen; }
 
 void powerSetMode(PowerMode m) {
-    autoBy = false;
     chosen = m;
 
-    // Выживание фиксируем со сроком: радио в нём выключено, и снять фиксацию
-    // из дашборда потом уже нечем — вернуть автоматику должны мы сами.
-    if (m == POWER_SURVIVAL) {
-        manualSurvivalUntil = millis() + POWER_MANUAL_SURVIVAL_MS;
-        if (manualSurvivalUntil == 0) manualSurvivalUntil = 1;  // 0 занят
-        Serial.printf("Power: survival locked for %lu min, then back to auto\n",
-                      (unsigned long)(POWER_MANUAL_SURVIVAL_MS / 60000UL));
-    } else {
-        manualSurvivalUntil = 0;
-    }
-
-    // Команда принята всегда, но пока идёт замер — откладывается: ронять
-    // связь и гасить экран посреди отсчёта нельзя. Отказывать при этом
-    // незачем, иначе кнопка выглядела бы залипшей.
-    mode     = powerEffectiveMode(chosen, !stopwatch.idle());
-    swPinned = (mode != chosen);
-    if (swPinned)
+    // Команда принимается всегда, но пока идёт замер — откладывается: гасить
+    // экран и ужимать радио посреди отсчёта нельзя. Отказывать при этом
+    // незачем, иначе кнопка выглядела бы залипшей; выбор лежит в chosen и
+    // вступит в силу со сбросом секундомера.
+    mode = powerEffectiveMode(chosen, !stopwatch.idle());
+    if (mode != chosen)
         Serial.printf("Power: %s queued, held at normal until stopwatch reset\n",
                       powerProfile(chosen).name);
 
     applyProfile();
 }
 
-void powerSetAuto() {
-    autoBy = true;
-    manualSurvivalUntil = 0;
-    swPinned = false;
-    mode = chosen = evaluateAuto();
-    applyProfile();
-}
-
-bool      powerStopwatchPinned() { return swPinned; }
-PowerMode powerChosenMode()      { return chosen; }
-
 uint32_t powerSensorIntervalMs() { return powerProfile(mode).sensorMs; }
 bool     powerLedEnabled()       { return powerProfile(mode).led; }
-bool     powerWifiWanted()       { return powerProfile(mode).wifi; }
 
 bool powerScreenBatteryOkNow() {
     return powerScreenBatteryOk(battery.percent, battery.valid,
@@ -162,7 +113,7 @@ bool powerScreenBatteryOkNow() {
 }
 
 bool powerScreenScheduleAllowsNow(int hour) {
-    // Ночное окно осталось только за экраном: сам режим от часа не зависит,
+    // Ночное окно осталось только за экраном: сам уровень от часа не зависит,
     // а подсветке разрешено гореть ровно в «не ночь» — границы те же,
     // вывернутые.
     return powerScreenAllowed(mode, hour,
