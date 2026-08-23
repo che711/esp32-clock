@@ -22,11 +22,22 @@ bool        powerIsAuto();
 void powerSetMode(PowerMode m);   // зафиксировать режим вручную
 void powerSetAuto();              // вернуть автоматику по заряду
 
+// Идёт замер, и он держит уровень «обычный» поверх ручного выбора. Нужно
+// дашборду: без этого зафиксированный эконом с подсвеченным «normal» выглядит
+// как не сработавшая кнопка, а не как «вернём после сброса».
+bool        powerStopwatchPinned();
+PowerMode   powerChosenMode();    // что выбрано руками (в авто — текущее)
+
 // Параметры текущего профиля — их читает main.cpp
 uint32_t powerSensorIntervalMs();
 bool     powerLedEnabled();
 bool     powerWifiWanted();               // false — радио должно быть выключено
-bool     powerScreenAllowedNow(int hour); // false — экран гасим по расписанию
+// Два условия гашения экрана, и спрашиваются они всегда порознь. Расписание
+// требует знать час, рубеж по заряду — нет, поэтому он работает и до первой
+// синхронизации NTP. И перебить подсветкой можно только расписание: рубеж по
+// заряду не обходится ничем (см. applyAutoBrightness/screenSetPower).
+bool     powerScreenBatteryOkNow();       // false — заряд на исходе, панель гасим
+bool     powerScreenScheduleAllowsNow(int hour);
 
 // Радио сконфигурировать под текущий профиль. Вызывать после
 // подключения: до него esp_wifi_* возвращают ошибку.

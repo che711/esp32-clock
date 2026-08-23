@@ -24,6 +24,7 @@ void displaySetManualPct(int pct);    // ручной режим, 0..100 %
 void displaySetAuto();                // вернуться к авто-режиму
 bool displayIsManual();
 void displayAutoForHour(int hour);    // применить уровень часа (в ручном — ничего)
+void displayAutoNoTime();             // уровень «часы не встали» (в ручном — ничего)
 void displaySetAutoScale(uint8_t pct); // масштаб авто-яркости, % (эконом-режимы)
 
 uint8_t     displayLevel();           // текущий уровень шкалы 0..255

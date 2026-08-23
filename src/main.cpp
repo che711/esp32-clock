@@ -97,17 +97,35 @@ static bool screenPeekActive(uint32_t now) {
     return true;
 }
 
+// Час известен — ставим уровень по расписанию, нет — уровень «времени нет».
+// В ручном режиме обе функции внутри ничего не делают.
+static void applyAutoLevelFor(bool haveHour, int hour) {
+    if (haveHour) displayAutoForHour(hour);
+    else          displayAutoNoTime();
+}
+
 void applyAutoBrightness() {
-    if (!timeSynced) return;
     struct tm t;
-    if (!localTimeNow(&t)) return;
+    // Раньше функция выходила первой же строкой по !timeSynced — и вместе с
+    // расписанием отключались и яркость, и рубеж по заряду: без синхронизации
+    // NTP панель оставалась на стартовом уровне, а порог POWER_SCREEN_OFF_PCT
+    // не срабатывал никогда. Устройство без сети жгло экран до brownout.
+    // Теперь без времени пропускается только то, что без часа не считается.
+    bool haveHour = timeSynced && localTimeNow(&t);
+    int  hour     = haveHour ? t.tm_hour : 0;
 
-    bool allowed = powerScreenAllowedNow(t.tm_hour);
+    // Две причины гасить экран, и подсветка вправе перебить только одну.
+    bool battOk  = powerScreenBatteryOkNow();
+    bool schedOk = !haveHour || powerScreenScheduleAllowsNow(hour);
+    bool allowed = battOk && schedOk;
 
-    // Пока идёт подсветка, расписание уступает — но только ей одной:
-    // истечёт окно, и ближайший же заход погасит панель обычным путём.
-    if (!allowed && screenPeekActive(millis())) {
-        displayAutoForHour(t.tm_hour);
+    // Пока идёт подсветка, расписание уступает — но только оно: рубеж по заряду
+    // подсветка не перебивает. Полминуты OLED на исходе банки это не только
+    // лишние миллиампер-часы, но и просадка напряжения, из-за которой чип уходит
+    // в brownout, — часы не «покажут время напоследок», а выключатся совсем.
+    // Истечёт окно — и ближайший же заход погасит панель обычным путём.
+    if (!allowed && battOk && screenPeekActive(millis())) {
+        applyAutoLevelFor(haveHour, hour);
         return;
     }
 
@@ -127,7 +145,7 @@ void applyAutoBrightness() {
         screenOffBySchedule = false;
     }
 
-    displayAutoForHour(t.tm_hour);   // в ручном режиме внутри ничего не делает
+    applyAutoLevelFor(haveHour, hour);
 }
 
 // Сколько ещё гореть по подсветке, секунды; 0 — подсветки нет. Нужно
@@ -144,15 +162,27 @@ uint32_t screenPeekLeftS() {
 // что кроме самой панели трогает расписание: включение в запрещённый час
 // заводит подсветку, выключение снимает её досрочно.
 void screenSetPower(bool on) {
-    displaySetPower(on);
-
     if (!on) {
+        displaySetPower(false);
         screenPeekUntil = 0;         // погасили сами — досматривать нечего
         return;
     }
 
+    // Рубеж по заряду не обходится ничем, в том числе этой командой: иначе
+    // подсветка сводила бы его на нет — зажгли на полминуты, и она же уронила
+    // устройство в brownout. Часа для проверки не нужно, поэтому она работает
+    // и без синхронизации времени. Отказ виден снаружи: display_on в ответе и
+    // в снимке — фактическое состояние панели, а не то, что попросили.
+    if (!powerScreenBatteryOkNow()) {
+        screenPeekUntil = 0;
+        Serial.println("Display: ON refused, battery critical");
+        return;
+    }
+
+    displaySetPower(true);
+
     struct tm t;
-    if (timeSynced && localTimeNow(&t) && !powerScreenAllowedNow(t.tm_hour)) {
+    if (timeSynced && localTimeNow(&t) && !powerScreenScheduleAllowsNow(t.tm_hour)) {
         screenPeekUntil = millis() + POWER_SCREEN_PEEK_MS;
         if (screenPeekUntil == 0) screenPeekUntil = 1;   // 0 занят под «нет подсветки»
         Serial.printf("Display: night peek %lus\n",
@@ -174,12 +204,28 @@ void swStart() {
     if (stopwatch.start(millis())) {
         displayInvalidateStopwatch();   // первый кадр после старта — полный
         setRadioSaving(false);
+
+        // Замер обязан быть виден, из какого бы режима и часа его ни начали.
+        // powerLoop() здесь, а не на следующем обороте цикла: он поднимает
+        // уровень до обычного (в том числе поверх ручной фиксации), а вместе
+        // с ним снимает ночное гашение экрана — иначе первые кадры уходили бы
+        // в темноту. screenSetPower() добирает случай, когда панель погасили
+        // руками кнопкой в дашборде.
+        //
+        // Порядок важен: после powerLoop() режим уже «обычный», расписание
+        // экран не ограничивает, и screenSetPower() не заводит ночную
+        // подсветку на POWER_SCREEN_PEEK_MS — иначе она погасила бы панель
+        // через полминуты посреди отсчёта.
+        powerLoop();
+        screenSetPower(true);
+
         Serial.println("Stopwatch START");
     }
 }
 
 void swPause() {
     if (stopwatch.pause(millis())) {
+        forceRedraw = true;             // маркер «II» — сразу, а не со сменой секунды
         setRadioSaving(true);           // счётчик заморожен, точность больше не нужна
         Serial.println("Stopwatch PAUSE");
     }
@@ -194,28 +240,71 @@ void swReset() {
 }
 
 // ─── WiFi + NTP ───────────────────────────────────────────
-static void connectWifi() {
+//
+//  Подключение — автомат, а не цикл с delay() внутри. Ассоциация занимает
+//  секунды, а из loop() она вызывается на возврате из выживания: пока
+//  connectWifi() крутил свои 30 × delay(500), вставало всё — часы, секундомер,
+//  веб и опрос датчика, до пятнадцати секунд разом.
+//
+//  Наружу торчат два вызова: wifiBeginConnect() начинает, wifiConnectStep()
+//  двигает на один шаг и говорит, закончилось ли. Вся работа «после связи»
+//  собрана в wifiOnConnected(), чтобы не разъезжалась между путями.
+static bool     wifiConnecting   = false;
+static uint32_t wifiConnectStart = 0;
+static uint32_t wifiDotMs        = 0;   // ритм точек в логе, раз в 500 мс
+// Отработала ли wifiOnConnected() для текущей ассоциации. Связь поднимается не
+// только через автомат: setAutoReconnect(true) и WiFi.reconnect() возвращают её
+// сами, мимо него. Без этого признака после такого возврата не было бы ни
+// mDNS, ни настроек радио под профиль — то есть clock.local молчал бы до ребута.
+static bool     wifiReady        = false;
+
+static void wifiOnConnected() {
+    wifiReady = true;
+    localIP = WiFi.localIP().toString();
+    Serial.printf("\nIP: %s\n", localIP.c_str());
+    // Пока идёт замер секундомера, сон радио выключен ради точности отсчёта
+    // (см. setRadioSaving) — реконнект посреди замера включать его обратно
+    // не должен. Ровно та же оговорка, что и в powerApplyRadio().
+    if (stopwatch.idle()) setRadioSaving(true);
+    powerApplyRadio();          // мощность и listen_interval под режим
+    // end() перед begin(): сюда заходят и повторно — после возврата из
+    // выживания, где радио выключалось вместе с ответчиком mDNS.
+    MDNS.end();
+    if (MDNS.begin(DEVICE_HOSTNAME)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
+    }
+}
+
+static void wifiBeginConnect() {
     Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(DEVICE_HOSTNAME);
     WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    uint8_t tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 30) {
-        delay(500); Serial.print("."); tries++;
-    }
+    wifiConnecting   = true;
+    wifiReady        = false;
+    wifiConnectStart = millis();
+    wifiDotMs        = wifiConnectStart;
+}
+
+// true — подключение больше не в процессе: либо связь есть, либо вышло время.
+// Промах не страшен: обычная проверка связи раз в 10 с сделает WiFi.reconnect().
+static bool wifiConnectStep(uint32_t now) {
+    if (!wifiConnecting) return true;
+
     if (WiFi.status() == WL_CONNECTED) {
-        localIP = WiFi.localIP().toString();
-        Serial.printf("\nIP: %s\n", localIP.c_str());
-        setRadioSaving(true);
-        powerApplyRadio();          // мощность и listen_interval под режим
-        if (MDNS.begin(DEVICE_HOSTNAME)) {
-            MDNS.addService("http", "tcp", 80);
-            Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
-        }
-    } else {
-        Serial.println("\nWiFi FAILED");
+        wifiConnecting = false;
+        wifiOnConnected();
+        return true;
     }
+    if (now - wifiDotMs >= 500) { wifiDotMs = now; Serial.print("."); }
+    if (now - wifiConnectStart >= WIFI_CONNECT_TIMEOUT_MS) {
+        wifiConnecting = false;
+        Serial.println("\nWiFi FAILED");
+        return true;
+    }
+    return false;
 }
 
 // Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
@@ -261,7 +350,12 @@ static void radioOff(const char* why) {
     if (WiFi.getMode() == WIFI_OFF) return;
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    localIP = "";
+    // Выключение радио отменяет и начатую ассоциацию: держать взведённый
+    // автомат при выключенном передатчике не за чем, а забытый флаг заблокировал
+    // бы следующую попытку подключиться.
+    wifiConnecting = false;
+    wifiReady      = false;
+    localIP        = "";
     Serial.printf("Power: WiFi off (%s)\n", why);
 }
 
@@ -273,10 +367,20 @@ static void maintainSurvivalRadio(uint32_t now) {
             ntpWaking    = true;
             ntpRequested = false;
             ntpWakeStart = now;
-            WiFi.mode(WIFI_STA);
-            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+            wifiBeginConnect();
         }
         return;
+    }
+
+    // Связь в этом окне поднимается тем же автоматом, что и в обычном режиме,
+    // а не голыми mode()/begin(). Разница в wifiOnConnected(): она ставит
+    // localIP и поднимает mDNS. Без неё устройство эти полминуты было в сети,
+    // но недостижимо — clock.local молчал, дашборд показывал пустой адрес,
+    // а запрос с Origin по IP получал 403, потому что localIP пустой.
+    if (wifiConnecting) {
+        wifiConnectStep(now);
+    } else if (WiFi.status() == WL_CONNECTED && !wifiReady) {
+        wifiOnConnected();                // поднялась мимо автомата
     }
 
     if (WiFi.status() == WL_CONNECTED && !ntpRequested) {
@@ -299,18 +403,33 @@ static void maintainNetwork() {
 
     if (!powerWifiWanted()) { maintainSurvivalRadio(now); return; }
 
-    // Вернулись из выживания — радио надо поднять заново
-    if (WiFi.getMode() == WIFI_OFF) {
+    // Пока идёт ассоциация — только двигаем автомат. Проверять связь и
+    // ре-синкать NTP посреди подключения нечего.
+    //
+    // ntpWaking снимаем здесь же: если попытку начало окно NTP, а режим успел
+    // смениться, эту же ассоциацию доводит обычный путь — окно кончилось, и
+    // переподключаться заново после него не надо.
+    if (wifiConnecting) { ntpWaking = false; wifiConnectStep(now); return; }
+
+    // Вернулись из выживания — радио надо поднять заново. Случай ntpWaking
+    // отдельно: там радио уже в STA, и без этой ветки соединение осталось бы
+    // недоделанным — без localIP и без mDNS, то есть дашборд не найти.
+    if (WiFi.getMode() == WIFI_OFF || ntpWaking) {
         ntpWaking = false;
-        connectWifi();
+        wifiBeginConnect();
         return;
     }
 
     if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
         lastCheck = now;
         if (WiFi.status() != WL_CONNECTED) {
+            wifiReady = false;
             Serial.println("WiFi lost -> reconnect");
             WiFi.reconnect();
+        } else if (!wifiReady) {
+            // Связь вернулась мимо автомата — авто-реконнектом стека или
+            // предыдущим WiFi.reconnect(). Доводим её до конца тем же путём.
+            wifiOnConnected();
         }
         String ip = WiFi.localIP().toString();
         if (ip != localIP) localIP = ip;
@@ -388,12 +507,15 @@ static void updateWeather() {
     if (now - lastSensorMs >= powerSensorIntervalMs()) {
         lastSensorMs = now;
         weather = sensorRead();
-        if (!weather.valid) {
-            ledColor(4, 0, 0);                   // красный — ошибка датчика
-            ledBlinking = false;                 // горит ровно, не мигок
-        } else if (!powerLedEnabled()) {
+        // Профиль спрашиваем первым: в экономе индикация молчит вся, включая
+        // аварийную. Раньше «датчик умер» стояло выше — и красный горел РОВНО,
+        // то есть непрерывно, именно в режимах, заведённых ради экономии.
+        if (!powerLedEnabled()) {
             ledColor(0, 0, 0);                   // в экономе индикация молчит
             ledBlinking = false;
+        } else if (!weather.valid) {
+            ledColor(4, 0, 0);                   // красный — ошибка датчика
+            ledBlinking = false;                 // горит ровно, не мигок
         } else if (battery.valid && battery.low) {
             ledBlink(6, 3, 0);                   // жёлтый — АКБ разряжена
         } else {
@@ -431,7 +553,11 @@ void setup() {
     displayBegin();
     displaySplash("Connecting WiFi...");
 
-    connectWifi();
+    // В setup() ждём связь на месте: показывать всё равно нечего — на экране
+    // заставка, — а syncNTP() ниже без сети бессмысленна. Автомат тот же, что
+    // крутится в loop(), просто здесь его прокачиваем сами.
+    wifiBeginConnect();
+    while (!wifiConnectStep(millis())) delay(50);
     syncNTP();
     powerBegin();          // профиль применяем, когда экран и радио уже есть
 

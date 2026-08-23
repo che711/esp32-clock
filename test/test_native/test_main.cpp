@@ -43,32 +43,67 @@ void test_uptime_large() {
 // ─── Яркость ─────────────────────────────────────────────
 void test_brightness_night_22() {
     BrightnessLevel b = brightnessForHour(22);
-    TEST_ASSERT_EQUAL_UINT8(15, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_NIGHT, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Night", b.label);
 }
 
 void test_brightness_night_3() {
     BrightnessLevel b = brightnessForHour(3);
-    TEST_ASSERT_EQUAL_UINT8(15, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_NIGHT, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Night", b.label);
 }
 
 void test_brightness_morning() {
     BrightnessLevel b = brightnessForHour(7);
-    TEST_ASSERT_EQUAL_UINT8(80, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_MORNING, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Morning", b.label);
 }
 
 void test_brightness_day() {
     BrightnessLevel b = brightnessForHour(12);
-    TEST_ASSERT_EQUAL_UINT8(200, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_DAY, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Day", b.label);
 }
 
 void test_brightness_evening() {
     BrightnessLevel b = brightnessForHour(21);
-    TEST_ASSERT_EQUAL_UINT8(120, b.contrast);
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_EVENING, b.contrast);
     TEST_ASSERT_EQUAL_STRING("Evening", b.label);
+}
+
+// Таблица часов задана на перцептивной шкале, а светимость должна остаться
+// той, что была до перехода на гамму: тогда числа уезжали прямо в регистр
+// тока. Этот тест и держит пересчёт — иначе таблицу снова однажды прочтут
+// как доли тока и ночь опять просядет в тридцать раз.
+static void assertAutoLevelDrive(uint8_t level, uint8_t legacyContrast) {
+    float want = (float)(legacyContrast + 1) / 256.0f;
+    float got  = panelDriveFraction(panelDriveForLevel(level));
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, want, got);
+}
+
+void test_brightness_levels_keep_pre_gamma_output() {
+    assertAutoLevelDrive(CONTRAST_NIGHT,    15);
+    assertAutoLevelDrive(CONTRAST_MORNING,  80);
+    assertAutoLevelDrive(CONTRAST_EVENING, 120);
+    assertAutoLevelDrive(CONTRAST_DAY,     200);
+}
+
+// Уровень, на который встаёт «включить экран» при нулевой яркости, обязан быть
+// видимым: единица по гамме — это 1/4096 тока, панель на ней неотличима от
+// выключенной, и экран числился включённым, оставаясь чёрным.
+void test_min_visible_level_is_actually_visible() {
+    float f = panelDriveFraction(panelDriveForLevel(CONTRAST_MIN_VISIBLE));
+    TEST_ASSERT_TRUE(f > 20.0f * panelDriveFraction(panelDriveForLevel(1)));
+    TEST_ASSERT_TRUE(f >= 1.0f / 256.0f);
+}
+
+// Часы не встали — уровень всё равно должен быть выставлен, и не максимальный:
+// именно на максимуме панель раньше и оставалась без синхронизации NTP.
+void test_brightness_no_time_is_not_full_scale() {
+    BrightnessLevel b = brightnessNoTime();
+    TEST_ASSERT_TRUE(b.contrast > 0);
+    TEST_ASSERT_TRUE(b.contrast < CONTRAST_MAX);
+    TEST_ASSERT_EQUAL_STRING("No time", b.label);
 }
 
 void test_brightness_boundary_6() {
@@ -91,11 +126,33 @@ void test_brightness_pct_full() {
 }
 
 void test_brightness_pct_night() {
-    TEST_ASSERT_EQUAL_UINT8(5, brightnessPct(15));
+    TEST_ASSERT_EQUAL_UINT8(6, brightnessPct(15));   // 15/255 = 5.88 %, округляем
 }
 
 void test_brightness_pct_zero() {
     TEST_ASSERT_EQUAL_UINT8(0, brightnessPct(0));
+}
+
+// Ноль — это «выключить», а не «почти не светит»: округление не должно его
+// сдвинуть, иначе ползунок в нижнем положении переставал бы гасить панель.
+void test_pct_zero_stays_off() {
+    TEST_ASSERT_EQUAL_UINT8(0, pctToContrast(0));
+    TEST_ASSERT_EQUAL_UINT8(0, pctToContrast(-5));
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_MAX, pctToContrast(100));
+    TEST_ASSERT_EQUAL_UINT8(CONTRAST_MAX, pctToContrast(150));
+}
+
+// Путь «проценты → уровень → проценты» обязан сходиться на всей шкале. С
+// отбрасыванием дробной части он терял единицу на каждом обороте (50 → 127 →
+// 49 → 124 → 48): дашборд показывал не то, что выставили, а скрипт, читающий
+// brightness_pct и пишущий его обратно, медленно уводил яркость вниз.
+void test_pct_contrast_roundtrip_is_stable() {
+    for (int pct = 0; pct <= 100; pct++) {
+        uint8_t level = pctToContrast(pct);
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)pct, brightnessPct(level));
+        // и второй оборот не сдвигает уровень
+        TEST_ASSERT_EQUAL_UINT8(level, pctToContrast(brightnessPct(level)));
+    }
 }
 
 // ─── Время ────────────────────────────────────────────────
@@ -284,6 +341,58 @@ void test_sw_survives_millis_overflow() {
 
 // Веб-интерфейс получает состояние числом в поле sw_state —
 // значения менять нельзя, иначе кнопки в браузере поедут
+// ─── Номер замера (gen) ──────────────────────────────────
+// Круги живут в браузере, устройство о них не знает. Отличить «связь моргнула,
+// замер тот же» от «замер начали заново» можно только по этому номеру, поэтому
+// правило, когда он меняется, а когда нет, закреплено тестами.
+
+// Пауза и продолжение — тот же замер: круги обязаны пережить их.
+void test_sw_gen_survives_pause_resume() {
+    Stopwatch sw;
+    sw.start(1000);
+    uint32_t gen = sw.gen;
+    sw.pause(2000);
+    TEST_ASSERT_EQUAL_UINT32(gen, sw.gen);
+    sw.start(3000);
+    TEST_ASSERT_EQUAL_UINT32(gen, sw.gen);
+}
+
+// Повторный старт на ходу ничего не меняет — не меняет и номер.
+void test_sw_gen_unchanged_on_restart_noop() {
+    Stopwatch sw;
+    sw.start(1000);
+    uint32_t gen = sw.gen;
+    sw.start(1500);
+    TEST_ASSERT_EQUAL_UINT32(gen, sw.gen);
+}
+
+// Сброс и старт из простоя — уже другой замер.
+void test_sw_gen_changes_on_new_run() {
+    Stopwatch sw;
+    sw.start(1000);
+    uint32_t first = sw.gen;
+    sw.reset();
+    TEST_ASSERT_NOT_EQUAL(first, sw.gen);
+    uint32_t afterReset = sw.gen;
+    sw.start(2000);
+    TEST_ASSERT_NOT_EQUAL(afterReset, sw.gen);
+    TEST_ASSERT_NOT_EQUAL(first, sw.gen);
+}
+
+// Номер не переиспользуется: подряд идущие замеры различимы между собой.
+void test_sw_gen_is_unique_per_run() {
+    Stopwatch sw;
+    uint32_t seen[4];
+    for (int i = 0; i < 4; i++) {
+        sw.start(1000 * (i + 1));
+        seen[i] = sw.gen;
+        sw.reset();
+    }
+    for (int i = 0; i < 4; i++)
+        for (int j = i + 1; j < 4; j++)
+            TEST_ASSERT_NOT_EQUAL(seen[i], seen[j]);
+}
+
 void test_sw_state_codes_are_stable() {
     TEST_ASSERT_EQUAL_UINT8(0, (uint8_t)Stopwatch::IDLE);
     TEST_ASSERT_EQUAL_UINT8(1, (uint8_t)Stopwatch::RUNNING);
@@ -311,18 +420,43 @@ void test_battery_curve_point() {
     TEST_ASSERT_EQUAL_UINT8(50, batteryVoltageToPercent(3.82f));
 }
 
-// Хвост поджат под реальную отсечку устройства: ниже ~3.6 В диод и LDO
-// уже не держат 3.3 В, поэтому «настоящих» процентов там показывать нечего
+// Ноль шкалы — на отсечке устройства, а не элемента: ниже ~3.55 В диод и LDO
+// уже не держат 3.3 В, и оставшаяся ёмкость банки этим часам недоступна
 void test_battery_curve_tail_matches_cutoff() {
-    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.70f));
-    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.72f));
-    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.55f));
+    TEST_ASSERT_EQUAL_UINT8(10, batteryVoltageToPercent(3.68f));
+    TEST_ASSERT_EQUAL_UINT8(5,  batteryVoltageToPercent(3.60f));
+    TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.50f));
     TEST_ASSERT_EQUAL_UINT8(0,  batteryVoltageToPercent(3.45f));
+}
+
+// Хвост должен быть растянут, а не поджат: на пункт шкалы внизу приходится
+// заметно больше милливольт, чем шумит АЦП, иначе индикатор дрожит на месте.
+// Между 3.74 В и 3.68 В — десять пунктов, то есть 6 мВ на пункт (было 2 мВ),
+// ниже — ещё положе. Проверяем только хвост: середина кривой круче по
+// физике элемента (на плато 3.77…3.79 В лежат целых десять процентов),
+// и растягивать её было бы не честнее, а наоборот.
+void test_battery_tail_is_not_steeper_than_adc_noise() {
+    const int NOISE_MV = 4;              // шум медианы набора — единицы мВ
+    for (int mv = 3500; mv + NOISE_MV <= 3740; mv++) {
+        uint8_t lo = batteryVoltageToPercent(mv / 1000.0f);
+        uint8_t hi = batteryVoltageToPercent((mv + NOISE_MV) / 1000.0f);
+        TEST_ASSERT_TRUE_MESSAGE(hi - lo <= 1,
+                                 "хвост кривой круче одного пункта на 4 мВ");
+    }
 }
 
 // Середина отрезка 3.68В(10%)…3.74В(20%) — проверяем интерполяцию
 void test_battery_interpolation() {
-    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.73f));
+    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));
+}
+
+// Пороги режимов заданы в процентах, но настраивались по напряжению.
+// Кривая и config.h должны сходиться: радио выключается раньше экрана,
+// и оба рубежа — выше отсечки железа.
+void test_battery_thresholds_land_where_intended() {
+    TEST_ASSERT_UINT8_WITHIN(1, 15, batteryVoltageToPercent(3.71f));  // survival
+    TEST_ASSERT_EQUAL_UINT8(5,      batteryVoltageToPercent(3.60f));  // экран прочь
+    TEST_ASSERT_EQUAL_UINT8(20,     batteryVoltageToPercent(3.74f));  // BATTERY_LOW_V
 }
 
 // Кривая обязана быть монотонной: выше напряжение — не меньше процент
@@ -334,6 +468,20 @@ void test_battery_monotonic() {
         prev = pct;
     }
     TEST_ASSERT_EQUAL_UINT8(100, prev);
+}
+
+// Пересчёт процентов в мА·ч. Шкала идёт по доступной ёмкости, а не по
+// паспортной: сотня — это полный бак этих часов (~2600 мА·ч), а не полная
+// банка (~3300). Остальные ~700 лежат ниже отсечки 3.5 В.
+void test_battery_mah_scale_is_usable_capacity() {
+    TEST_ASSERT_EQUAL_UINT16(2600, batteryRemainingMah(100, 2600));
+    TEST_ASSERT_EQUAL_UINT16(1300, batteryRemainingMah(50,  2600));
+    TEST_ASSERT_EQUAL_UINT16(0,    batteryRemainingMah(0,   2600));
+}
+
+// Битый процент выше сотни не должен давать больше полной банки
+void test_battery_mah_clamps_above_full() {
+    TEST_ASSERT_EQUAL_UINT16(2600, batteryRemainingMah(200, 2600));
 }
 
 void test_battery_plausible_usb() {
@@ -571,10 +719,48 @@ void test_power_screen_ignores_critical_without_battery() {
 }
 
 // Расписание эконома при живом заряде продолжает действовать
+// Рубеж по заряду обязан считаться без часа: он вынесен из расписания именно
+// затем, чтобы работать и тогда, когда время не синхронизировалось.
+void test_power_screen_battery_gate_needs_no_hour() {
+    TEST_ASSERT_FALSE(powerScreenBatteryOk(5, true, 5));
+    TEST_ASSERT_FALSE(powerScreenBatteryOk(0, true, 5));
+    TEST_ASSERT_TRUE(powerScreenBatteryOk(6, true, 5));
+    TEST_ASSERT_TRUE(powerScreenBatteryOk(0, false, 5));   // банки нет — не наш случай
+}
+
 void test_power_screen_critical_and_schedule_combine() {
     TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 3, 7, 23, 80, true, 5));
     TEST_ASSERT_TRUE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 80, true, 5));
     TEST_ASSERT_FALSE(powerScreenAllowedAt(POWER_ECO, 12, 7, 23, 4, true, 5));
+}
+
+// Секундомер поднимает уровень поверх ручной фиксации: замер запускают,
+// чтобы на него смотреть, а зафиксированный эконом ночью гасит экран.
+void test_power_effective_mode_stopwatch_beats_manual_eco() {
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_ECO, true));
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_SURVIVAL, true));
+}
+
+// Выбор пользователя не теряется — он возвращается со сбросом замера
+void test_power_effective_mode_restores_choice() {
+    TEST_ASSERT_EQUAL_INT(POWER_ECO,      powerEffectiveMode(POWER_ECO, false));
+    TEST_ASSERT_EQUAL_INT(POWER_SURVIVAL, powerEffectiveMode(POWER_SURVIVAL, false));
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL,   powerEffectiveMode(POWER_NORMAL, false));
+}
+
+// В «обычном» поднимать нечего — фиксации не возникает
+void test_power_effective_mode_normal_is_not_pinned() {
+    TEST_ASSERT_EQUAL_INT(POWER_NORMAL, powerEffectiveMode(POWER_NORMAL, true));
+}
+
+// Экран под замером горит в любой час: профиль «обычный» окна не знает
+void test_power_screen_on_at_night_while_stopwatch_runs() {
+    PowerMode m = powerEffectiveMode(POWER_ECO, true);
+    TEST_ASSERT_TRUE(powerScreenAllowed(m, 3, 6, 22));    // 03:00, ночь
+    TEST_ASSERT_TRUE(powerScreenAllowed(m, 23, 6, 22));   // 23:00
+    // Без замера тот же час экран гасит — правило именно про замер
+    TEST_ASSERT_FALSE(powerScreenAllowed(powerEffectiveMode(POWER_ECO, false),
+                                         3, 6, 22));
 }
 
 void test_power_mode_from_name() {
@@ -817,12 +1003,17 @@ int main(int argc, char** argv) {
     RUN_TEST(test_brightness_morning);
     RUN_TEST(test_brightness_day);
     RUN_TEST(test_brightness_evening);
+    RUN_TEST(test_brightness_levels_keep_pre_gamma_output);
+    RUN_TEST(test_min_visible_level_is_actually_visible);
+    RUN_TEST(test_brightness_no_time_is_not_full_scale);
     RUN_TEST(test_brightness_boundary_6);
     RUN_TEST(test_brightness_boundary_8);
     RUN_TEST(test_brightness_boundary_20);
     RUN_TEST(test_brightness_pct_full);
     RUN_TEST(test_brightness_pct_night);
     RUN_TEST(test_brightness_pct_zero);
+    RUN_TEST(test_pct_zero_stays_off);
+    RUN_TEST(test_pct_contrast_roundtrip_is_stable);
 
     RUN_TEST(test_format_time_normal);
     RUN_TEST(test_format_time_midnight);
@@ -856,6 +1047,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_sw_reset_clears);
     RUN_TEST(test_sw_reset_while_running);
     RUN_TEST(test_sw_survives_millis_overflow);
+    RUN_TEST(test_sw_gen_survives_pause_resume);
+    RUN_TEST(test_sw_gen_unchanged_on_restart_noop);
+    RUN_TEST(test_sw_gen_changes_on_new_run);
+    RUN_TEST(test_sw_gen_is_unique_per_run);
     RUN_TEST(test_sw_state_codes_are_stable);
 
     RUN_TEST(test_battery_full);
@@ -864,8 +1059,12 @@ int main(int argc, char** argv) {
     RUN_TEST(test_battery_below_empty);
     RUN_TEST(test_battery_curve_point);
     RUN_TEST(test_battery_curve_tail_matches_cutoff);
+    RUN_TEST(test_battery_tail_is_not_steeper_than_adc_noise);
     RUN_TEST(test_battery_interpolation);
+    RUN_TEST(test_battery_thresholds_land_where_intended);
     RUN_TEST(test_battery_monotonic);
+    RUN_TEST(test_battery_mah_scale_is_usable_capacity);
+    RUN_TEST(test_battery_mah_clamps_above_full);
     RUN_TEST(test_battery_plausible_usb);
     RUN_TEST(test_battery_plausible_battery);
     RUN_TEST(test_battery_plausible_full_with_calibration);
@@ -906,7 +1105,12 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_screen_off_on_critical_charge);
     RUN_TEST(test_power_screen_on_above_critical);
     RUN_TEST(test_power_screen_ignores_critical_without_battery);
+    RUN_TEST(test_power_screen_battery_gate_needs_no_hour);
     RUN_TEST(test_power_screen_critical_and_schedule_combine);
+    RUN_TEST(test_power_effective_mode_stopwatch_beats_manual_eco);
+    RUN_TEST(test_power_effective_mode_restores_choice);
+    RUN_TEST(test_power_effective_mode_normal_is_not_pinned);
+    RUN_TEST(test_power_screen_on_at_night_while_stopwatch_runs);
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
 

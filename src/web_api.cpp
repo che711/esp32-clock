@@ -19,6 +19,13 @@ static WebServer        server(80);
 static WebSocketsServer webSocket(81);
 static uint32_t         requestCount = 0;
 
+// Буфер снимка. Один на все три места, где он собирается, — иначе при
+// добавлении поля легко нарастить формат и забыть один из них: snprintf
+// обрежет строку молча, и дашборд получит JSON без закрывающей скобки.
+// Сейчас снимок занимает ~730 байт; запас — на длинный SSID и на пару
+// будущих полей.
+static const size_t JSON_BUF = 1280;
+
 // ─── Защита изменяющих запросов ───────────────────────────
 // Любая открытая в браузере страница может отправить нам POST или открыть
 // WebSocket — локальная сеть тут не граница, потому что код выполняется
@@ -36,6 +43,14 @@ static bool originAccepted() {
     String origin = server.header("Origin");
     if (origin.length() == 0) return true;
     return originIsLocalDevice(origin.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
+}
+
+// Булев параметр запроса. Раньше на месте вызовов стояло `arg(...) != "0"`,
+// то есть истиной считалось всё, кроме строки "0": и "false", и "off", и просто
+// пустое значение включали экран. Признаём истинными только явные написания.
+static bool argIsTrue(const String& v) {
+    return v == "1" || v.equalsIgnoreCase("true")
+        || v.equalsIgnoreCase("on") || v.equalsIgnoreCase("yes");
 }
 
 static void sendForeignOrigin() {
@@ -82,6 +97,7 @@ static void buildJson(char* buf, size_t sz) {
         "\"screen_peek\":%lu,"
         "\"sw_state\":%d,"
         "\"sw_ms\":%lu,"
+        "\"sw_gen\":%lu,"
         "\"bmp_valid\":%s,"
         "\"bmp_temp\":%.2f,"
         "\"pressure\":%.2f,"
@@ -94,9 +110,13 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_v\":%.2f,"
         "\"bat_raw_v\":%.2f,"
         "\"bat_state\":\"%s\","
+        "\"bat_mah\":%d,"
+        "\"bat_mah_full\":%d,"
         "\"bat_low\":%s,"
         "\"power_mode\":\"%s\","
         "\"power_auto\":%s,"
+        "\"power_chosen\":\"%s\","
+        "\"power_pinned\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -114,6 +134,7 @@ static void buildJson(char* buf, size_t sz) {
         (unsigned long)screenPeekLeftS(),
         (int)stopwatch.state,
         (unsigned long)stopwatch.elapsed(millis()),
+        (unsigned long)stopwatch.gen,
         weather.valid ? "true" : "false",
         weather.temperature,
         weather.pressure,
@@ -126,16 +147,20 @@ static void buildJson(char* buf, size_t sz) {
         battery.voltage,
         batteryRawVoltage(),
         batteryState(),
+        (int)batteryRemainingMah(battery.percent, BATTERY_USABLE_MAH),
+        (int)BATTERY_USABLE_MAH,
         battery.low ? "true" : "false",
         powerModeName(),
         powerIsAuto() ? "true" : "false",
+        powerProfile(powerChosenMode()).name,
+        powerStopwatchPinned() ? "true" : "false",
         (unsigned long)requestCount
     );
 }
 
 void webApiBroadcast() {
     if (webSocket.connectedClients() == 0) return;  // некому слать — не тратим CPU
-    char json[1024];
+    char json[JSON_BUF];
     buildJson(json, sizeof(json));
     webSocket.broadcastTXT(json);
 }
@@ -151,7 +176,7 @@ static void handleRoot() {
 
 static void handleApiStats() {
     requestCount++;
-    char json[1024];
+    char json[JSON_BUF];
     buildJson(json, sizeof(json));
     server.send(200, "application/json", json);
 }
@@ -189,7 +214,7 @@ static void handleApiWeather() {
 static void handleApiBrightness() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
-    if (server.hasArg("auto")) {
+    if (server.hasArg("auto") && argIsTrue(server.arg("auto"))) {
         displaySetAuto();
         server.send(200, "application/json", "{\"ok\":true,\"mode\":\"auto\"}");
         applyAutoBrightness();       // сразу применяем авто-уровень
@@ -213,11 +238,14 @@ static void handleApiPower() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
     if (server.hasArg("on")) {
-        bool on = server.arg("on") != "0";
+        bool on = argIsTrue(server.arg("on"));
         screenSetPower(on);      // не displaySetPower: ночью включаем с таймером
+        // Отдаём фактическое состояние панели, а не запрошенное: включение
+        // могут и не выполнить (заряд на исходе), и ответ обязан это показать.
         char resp[48];
         snprintf(resp, sizeof(resp),
-                 "{\"ok\":true,\"display_on\":%s}", on ? "true" : "false");
+                 "{\"ok\":true,\"display_on\":%s}",
+                 displayIsOn() ? "true" : "false");
         server.send(200, "application/json", resp);
         webApiBroadcast();
         return;
@@ -231,7 +259,7 @@ static void handleApiPowerMode() {
     requestCount++;
     if (!originAccepted()) return sendForeignOrigin();
 
-    if (server.hasArg("auto") && server.arg("auto") != "0") {
+    if (server.hasArg("auto") && argIsTrue(server.arg("auto"))) {
         powerSetAuto();
     } else if (server.hasArg("mode")) {
         PowerMode m;
@@ -245,9 +273,16 @@ static void handleApiPowerMode() {
         return;
     }
 
-    char resp[80];
-    snprintf(resp, sizeof(resp), "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s}",
-             powerModeName(), powerIsAuto() ? "true" : "false");
+    // mode — что работает сейчас, chosen — что выбрано. Под замером они
+    // расходятся: секундомер держит «обычный» поверх ручного выбора, и
+    // дашборду надо показать принятую команду, а не поднятый уровень.
+    char resp[144];
+    snprintf(resp, sizeof(resp),
+             "{\"ok\":true,\"mode\":\"%s\",\"auto\":%s,"
+             "\"chosen\":\"%s\",\"pinned\":%s}",
+             powerModeName(), powerIsAuto() ? "true" : "false",
+             powerProfile(powerChosenMode()).name,
+             powerStopwatchPinned() ? "true" : "false");
     server.send(200, "application/json", resp);
     webApiBroadcast();
 }
@@ -269,7 +304,7 @@ static void handleNotFound() {
 static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
     if (type == WStype_CONNECTED) {
         requestCount++;
-        char json[1024];
+        char json[JSON_BUF];
         buildJson(json, sizeof(json));
         webSocket.sendTXT(num, json);
         Serial.printf("WS client #%d connected\n", num);
@@ -284,6 +319,28 @@ static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t 
                      (int)stopwatch.state,
                      (unsigned long)stopwatch.elapsed(millis()));
             webSocket.sendTXT(num, reply);
+            return;
+        }
+
+        // Живая яркость: "br:<0..100>" или "br:auto". Ползунок шлёт значение
+        // на каждый шаг жеста, поэтому этот путь обрабатывается до логов и до
+        // рассылки — десяток строк в Serial и десяток килобайт JSON в секунду
+        // стоили бы дороже самой регулировки. Отправитель значение и так знает,
+        // остальные вкладки увидят его ближайшим снимком (раз в секунду).
+        if (length > 3 && strncmp((char*)payload, "br:", 3) == 0) {
+            char val[8] = {0};
+            size_t n = length - 3;
+            if (n > sizeof(val) - 1) n = sizeof(val) - 1;
+            memcpy(val, payload + 3, n);
+            if (strcmp(val, "auto") == 0) {
+                displaySetAuto();
+                applyAutoBrightness();
+            } else {
+                int pct = atoi(val);
+                if (pct < 0)   pct = 0;
+                if (pct > 100) pct = 100;
+                displaySetManualPct(pct);
+            }
             return;
         }
 

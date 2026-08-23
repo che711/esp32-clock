@@ -16,9 +16,13 @@ static U8G2_SSD1322_NHD_256X64_F_4W_HW_SPI
 static bool        displayOn        = true;   // питание: /api/power и расписание
 // Уровень шкалы интерфейса, 0..255. В регистры тока панели он переводится
 // в refreshPanel() — там же объяснено, почему это не одно и то же.
-static uint8_t     currentLevel     = CONTRAST_MAX;
+//
+// Стартуем не с максимума: до первого applyAutoBrightness() успевают пройти
+// заставка и вся инициализация, а на батарее это самый дорогой режим панели.
+// Уровень тот же, что автоматика берёт при неизвестном часе (brightnessNoTime).
+static uint8_t     currentLevel     = CONTRAST_EVENING;
 static bool        manualBrightness = false;
-static const char* brightnessLabel  = "Day";
+static const char* brightnessLabel  = "No time";
 
 // Питание панели и яркость связаны (см. refreshPanel), поэтому обе функции
 // нужны раньше, чем идут их разделы.
@@ -33,7 +37,10 @@ static const int TEMP_BASELINE = 42;   // выше часов: шрифт мел
 
 // Геометрия поля ".mmm" последнего полного кадра; < 0 — нужен полный кадр.
 static int  swMsX = 0, swMsBoxX = -1, swMsBoxW = 0;
-static char swMmSs[6] = "";
+// Текст последнего полного кадра целиком. До часа по нему сверяются первые
+// пять символов "MM:SS", от часа — вся строка "HH:MM:SS": там миллисекунд нет,
+// и полный кадр нужен раз в секунду, а не на каждый вызов.
+static char swLastFull[16] = "";
 
 // ─── Инициализация ────────────────────────────────────────
 void displayBegin() {
@@ -81,9 +88,18 @@ static void refreshPanel() {
 void displaySetPower(bool on) {
     displayOn = on;
     // Включение при нулевой яркости иначе не дало бы ничего видимого —
-    // панель осталась бы в power save. Поднимаем до нижней ступени шкалы:
+    // панель осталась бы в power save. Поднимаем до нижней ЧИТАЕМОЙ ступени:
     // команда «включить экран» должна давать результат, который видно.
-    if (on && currentLevel == 0) applyLevel(1, "Manual");
+    //
+    // Единица тут не годится: по гамме это 1/4096 полного тока, панель на ней
+    // неотличима от выключенной. А в ручном режиме поправить уровень некому —
+    // displayAutoForHour() выходит сразу, — и экран так и оставался «включённым»
+    // и чёрным одновременно.
+    //
+    // Метка «Manual» здесь не догадка: нулевой уровень ставит только
+    // displaySetManualPct(0) — авто-яркость клампится единицей, — а значит
+    // manualBrightness к этому моменту уже true.
+    if (on && currentLevel == 0) applyLevel(CONTRAST_MIN_VISIBLE, "Manual");
     else                         refreshPanel();
     Serial.printf("Display -> %s\n", panelLit() ? "ON" : "OFF");
 }
@@ -120,9 +136,8 @@ void displaySetAutoScale(uint8_t pct) {
     autoScalePct = pct;
 }
 
-void displayAutoForHour(int hour) {
+static void applyAutoLevel(BrightnessLevel b) {
     if (manualBrightness) return;
-    BrightnessLevel b = brightnessForHour(hour);
     // Ниже единицы не опускаемся: ноль гасит панель совсем (см. refreshPanel),
     // а автоматика яркости экран выключать не должна — за это отвечают ночное
     // расписание и порог заряда.
@@ -134,10 +149,16 @@ void displayAutoForHour(int hour) {
     }
 }
 
+void displayAutoForHour(int hour) { applyAutoLevel(brightnessForHour(hour)); }
+
+// Часы не встали: расписание применить не к чему, но яркость выставить надо —
+// иначе панель осталась бы на стартовом уровне до самого первого синка.
+void displayAutoNoTime() { applyAutoLevel(brightnessNoTime()); }
+
 uint8_t     displayLevel()           { return currentLevel; }
 const char* displayBrightnessLabel() { return brightnessLabel; }
 
-void displayInvalidateStopwatch() { swMsBoxX = -1; }
+void displayInvalidateStopwatch() { swMsBoxX = -1; swLastFull[0] = '\0'; }
 
 // ─── Нижняя строка: погода + батарея ─────────────────────
 #if HAS_DISPLAY
@@ -278,7 +299,7 @@ void displayDraw() {
         int boxRight = ((xMs + msW + 7) / 8) * 8 + 8;   // +тайл запаса справа
         if (boxRight > 256) boxRight = 256;
         swMsBoxW = boxRight - swMsBoxX;
-        memcpy(swMmSs, full, 5);  swMmSs[5] = '\0';
+        snprintf(swLastFull, sizeof(swLastFull), "%s", full);
 
         u8g2.drawHLine(0, 53, 256);
 
@@ -341,7 +362,8 @@ void displayDraw() {
         u8g2.drawHLine(0, 53, 256);
 
         drawBottomStatus(nullptr, true, false);
-        swMsBoxX = -1;                 // на часах поля ".mmm" нет
+        swMsBoxX      = -1;            // на часах поля ".mmm" нет,
+        swLastFull[0] = '\0';          // и сверять следующий кадр не с чем
     }
 
     u8g2.sendBuffer();
@@ -360,8 +382,16 @@ void displayStopwatchFrame() {
     char full[16];
     formatStopwatch(el, full, sizeof(full));
 
-    // >= 1 часа формат "HH:MM:SS" — миллисекунд нет, дробить нечего.
-    if (el >= 3600000UL || swMsBoxX < 0 || memcmp(full, swMmSs, 5) != 0) {
+    // От часа формат "HH:MM:SS": миллисекунд в нём нет, дробить нечего — но и
+    // гнать полный кадр на каждый вызов незачем. Раньше условие el >= 3600000
+    // делало ровно это: значение менялось раз в секунду, а кадр уходил в панель
+    // 25 раз, по ~24 мс на SPI каждый.
+    if (el >= 3600000UL) {
+        if (strcmp(full, swLastFull) != 0) displayDraw();
+        return;
+    }
+
+    if (swMsBoxX < 0 || memcmp(full, swLastFull, 5) != 0) {
         displayDraw();
         return;
     }

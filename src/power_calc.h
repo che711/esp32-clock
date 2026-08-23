@@ -82,19 +82,38 @@ inline PowerMode powerAutoMode(PowerMode cur, bool stopwatchActive,
     return POWER_ECO;
 }
 
+// Тот же ответ, но для уровня, выбранного руками. powerAutoMode правило
+// «идёт замер — обычный режим» уже знает, а ручная фиксация раньше его
+// обходила: зафиксированный эконом ночью держал экран погашенным, и
+// секундомер шёл вслепую — при том, что запускали его именно чтобы смотреть.
+// Выбор пользователя при этом не теряется: он ждёт сброса секундомера.
+inline PowerMode powerEffectiveMode(PowerMode chosen, bool stopwatchActive) {
+    return stopwatchActive ? POWER_NORMAL : chosen;
+}
+
 // Можно ли держать экран включённым. В обычном режиме — всегда.
 inline bool powerScreenAllowed(PowerMode m, int hour, int onHour, int offHour) {
     if (!powerProfile(m).screenWindow) return true;
     return hourInWindow(hour, onHour, offHour);
 }
 
-// То же, но с последним рубежом: когда заряда почти не осталось, панель
-// гасится независимо от режима и расписания. Она — самый крупный потребитель,
-// и её выключение и продлевает работу, и снимает просадку напряжения,
-// из-за которой устройство ушло бы в brownout раньше времени.
+// Последний рубеж: когда заряда почти не осталось, панель гасится независимо
+// от режима и расписания. Она — самый крупный потребитель, и её выключение
+// и продлевает работу, и снимает просадку напряжения, из-за которой
+// устройство ушло бы в brownout раньше времени.
+//
+// Вынесено отдельно от расписания намеренно: расписание требует знать час, а
+// этот рубеж — нет. Пока оба жили в одной функции, вызывающая сторона не могла
+// проверить заряд, не имея времени, и без синхронизации NTP гашение по заряду
+// не работало вовсе.
+inline bool powerScreenBatteryOk(uint8_t pct, bool valid, uint8_t offPct) {
+    return !(valid && pct <= offPct);
+}
+
+// Оба условия сразу — для случая, когда час известен.
 inline bool powerScreenAllowedAt(PowerMode m, int hour, int onHour, int offHour,
                                  uint8_t pct, bool valid, uint8_t offPct) {
-    if (valid && pct <= offPct) return false;
+    if (!powerScreenBatteryOk(pct, valid, offPct)) return false;
     return powerScreenAllowed(m, hour, onHour, offHour);
 }
 
