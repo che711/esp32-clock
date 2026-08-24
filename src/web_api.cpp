@@ -124,6 +124,8 @@ static void buildJson(char* buf, size_t sz) {
         "\"power_mode\":\"%s\","
         "\"power_chosen\":\"%s\","
         "\"power_pinned\":%s,"
+        "\"reset_reason\":\"%s\","
+        "\"reset_abnormal\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
@@ -166,6 +168,8 @@ static void buildJson(char* buf, size_t sz) {
         powerModeName(),
         powerProfile(powerChosenMode()).name,
         powerIsHeld() ? "true" : "false",
+        resetReasonName(),
+        resetWasAbnormal() ? "true" : "false",
         (unsigned long)requestCount
     );
 }
@@ -241,6 +245,89 @@ static void handleApiWeather() {
         battery.valid ? "true" : "false",
         (int)battery.percent, battery.voltage);
     server.send(200, "application/json", json);
+}
+
+// ─── История для графиков ─────────────────────────────────
+// Ответ здесь на порядок больше снимка: 5 рядов по TREND_HISTORY_SIZE точек —
+// это ~12 КБ. Столько не собрать ни на стеке, ни в String, не разодрав кучу
+// ровно в тот момент, когда через неё же идёт раздача страницы. Поэтому
+// ответ уходит chunked: текст копится в буфере на полкилобайта и улетает
+// кусками по мере заполнения.
+struct ChunkWriter {
+    char   buf[512];
+    size_t len = 0;
+
+    void put(const char* s) {
+        size_t n = strlen(s);
+        if (len + n > sizeof(buf)) flush();
+        if (n > sizeof(buf)) { server.sendContent(s, n); return; }  // не влезет и в пустой
+        memcpy(buf + len, s, n);
+        len += n;
+    }
+    void printf(const char* fmt, float v) {
+        char tmp[24];
+        snprintf(tmp, sizeof(tmp), fmt, v);
+        put(tmp);
+    }
+    void flush() {
+        if (!len) return;
+        server.sendContent(buf, len);
+        len = 0;
+    }
+};
+
+// Один ряд значений: [1.23,null,4.56]. NAN — это «датчик молчал»,
+// и в JSON он обязан стать null: NaN литералом стандарт не знает,
+// JSON.parse на такой ответ падает целиком.
+static void writeSeries(ChunkWriter& out, const char* key, const char* fmt,
+                        float TrendSample::*field) {
+    out.put(",\"");
+    out.put(key);
+    out.put("\":[");
+    for (uint16_t i = 0; i < trendHistory.size(); i++) {
+        if (i) out.put(",");
+        float v = trendHistory.at(i).*field;
+        if (isnan(v)) out.put("null"); else out.printf(fmt, v);
+    }
+    out.put("]");
+}
+
+static void handleApiHistory() {
+    requestCount++;
+    const uint32_t now = millis();
+    const uint16_t n   = trendHistory.size();
+
+    server.sendHeader("Cache-Control", "no-store");   // история живая, кешировать нечего
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "application/json", "");
+
+    ChunkWriter out;
+    char head[96];
+    // step_s — ожидаемый шаг между точками (период опроса датчика), чтобы
+    // дашборд знал, когда ждать следующую. Возраст точек отдаём в секундах
+    // назад от «сейчас»: время устройства зависит от NTP, а разность millis()
+    // верна всегда, и часы браузера с часами прошивки сводить не приходится.
+    snprintf(head, sizeof(head), "{\"n\":%u,\"step_s\":%lu",
+             (unsigned)n, (unsigned long)(powerSensorIntervalMs() / 1000UL));
+    out.put(head);
+
+    out.put(",\"age\":[");
+    for (uint16_t i = 0; i < n; i++) {
+        char tmp[16];
+        snprintf(tmp, sizeof(tmp), "%s%lu", i ? "," : "",
+                 (unsigned long)trendHistory.ageS(i, now));
+        out.put(tmp);
+    }
+    out.put("]");
+
+    writeSeries(out, "temp",  "%.2f", &TrendSample::temp);
+    writeSeries(out, "press", "%.2f", &TrendSample::press);
+    writeSeries(out, "alt",   "%.1f", &TrendSample::alt);
+    writeSeries(out, "trend", "%.2f", &TrendSample::trend);
+
+    out.put("}");
+    out.flush();
+    server.sendContent("", 0);   // пустой чанк закрывает ответ
 }
 
 static void handleApiBrightness() {
@@ -389,6 +476,7 @@ void webApiBegin() {
     server.on("/api/stats",      HTTP_GET,  handleApiStats);
     server.on("/api/time",       HTTP_GET,  handleApiTime);
     server.on("/api/weather",    HTTP_GET,  handleApiWeather);
+    server.on("/api/history",    HTTP_GET,  handleApiHistory);
     server.on("/api/brightness", HTTP_POST, handleApiBrightness);
     server.on("/api/power",      HTTP_POST, handleApiPower);
     server.on("/api/powermode",  HTTP_POST, handleApiPowerMode);

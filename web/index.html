@@ -366,8 +366,12 @@
 
   /* Спарклайн */
   .spark-wrap { margin-top: auto; }
-  .spark-label { font-size: 9px; font-weight: 700; letter-spacing: 1.6px;
+  .spark-label { display: flex; align-items: baseline; justify-content: space-between;
+                 gap: 8px; font-size: 9px; font-weight: 700; letter-spacing: 1.6px;
                  text-transform: uppercase; color: var(--text-faint); margin-bottom: 7px; }
+  /* Глубина окна справа от подписи: без неё «TREND» ничего не обещает —
+     двадцать минут там истории или шесть часов, по картинке не различить. */
+  .spark-range { letter-spacing: 1px; font-weight: 600; opacity: 0.85; }
   .spark { display: block; width: 100%; height: 48px; border-radius: 8px;
            background: var(--surface-2); }
   .spark-empty { height: 48px; border-radius: 8px; background: var(--surface-2);
@@ -664,7 +668,7 @@
       </div>
       <div class="pill" id="mt-pill"><span class="pill-dot"></span><span id="mt-pill-txt">—</span></div>
       <div class="spark-wrap">
-        <div class="spark-label">Trend</div>
+        <div class="spark-label"><span>Trend</span><span class="spark-range" id="spark-temp-range"></span></div>
         <div id="spark-temp-box"><div class="spark-empty">collecting…</div></div>
       </div>
     </div>
@@ -680,7 +684,7 @@
       </div>
       <div class="pill" id="mp-pill"><span class="pill-dot"></span><span id="mp-pill-txt">—</span></div>
       <div class="spark-wrap">
-        <div class="spark-label">Trend</div>
+        <div class="spark-label"><span>Trend</span><span class="spark-range" id="spark-press-range"></span></div>
         <div id="spark-press-box"><div class="spark-empty">collecting…</div></div>
       </div>
     </div>
@@ -691,7 +695,7 @@
       <div class="m-value"><span id="ma-val">—</span><span class="m-unit">m</span></div>
       <div class="m-desc">Estimated from pressure relative to sea level</div>
       <div class="spark-wrap">
-        <div class="spark-label">Trend</div>
+        <div class="spark-label"><span>Trend</span><span class="spark-range" id="spark-alt-range"></span></div>
         <div id="spark-alt-box"><div class="spark-empty">collecting…</div></div>
       </div>
     </div>
@@ -703,7 +707,7 @@
       <div class="m-desc" id="mf-desc">Barometric change over the last hour</div>
       <div class="pill" id="mf-pill"><span class="pill-dot"></span><span id="mf-pill-txt">—</span></div>
       <div class="spark-wrap">
-        <div class="spark-label">Trend</div>
+        <div class="spark-label"><span>Trend</span><span class="spark-range" id="spark-fc-range"></span></div>
         <div id="spark-fc-box"><div class="spark-empty">collecting…</div></div>
       </div>
     </div>
@@ -736,6 +740,7 @@
       <div class="tile">
         <div class="tile-label">Uptime</div>
         <div class="tile-value" id="uptime-label">—</div>
+        <div class="tile-sub" id="reset-reason" title="Why the clock booted last time">—</div>
       </div>
       <div class="tile span2">
         <div class="tile-label">RAM</div>
@@ -1008,64 +1013,331 @@
   applyUnitUI();
 
   // ── Статистика: min / avg / max + история для графиков ──
-  const SPARK_MAX  = 300;    // точек в спарклайне (~5 мин при 1 Гц)
   const SAMPLE_MAX = 1000;   // строк в выгрузке CSV/JSON
 
-  function newStat() { return { min: null, max: null, sum: 0, n: 0, hist: [] }; }
-  let stats = { temp: newStat(), press: newStat(), alt: newStat(), trend: newStat(), chip: newStat() };
-  let samples = [];
+  // Счётчики min/avg/max переживают перезагрузку вкладки. Страница висит
+  // открытой сутками, и после случайного F5 суточный минимум температуры
+  // начинался заново с текущей — то есть показывал ровно то же, что и
+  // большое значение над ним. В localStorage уезжают только сами счётчики:
+  // история спарклайнов и строки выгрузки — это сотни точек на ряд, им место
+  // в памяти вкладки.
+  const STATS_KEY     = 'stats:v1';
+  const STATS_SAVE_MS = 5000;   // запись синхронная, чаще раза в 5 с ни к чему
+
+  function newStat()  { return { min: null, max: null, sum: 0, n: 0 }; }
+  function newStats() { return { temp: newStat(), press: newStat(), alt: newStat(),
+                                 trend: newStat(), chip: newStat() }; }
+
+  let stats       = newStats();
+  let samples     = [];
+  let statsSince  = Date.now();       // с какого момента копятся счётчики
+  const STAT_KEYS = Object.keys(stats);
 
   function pushStat(s, v) {
     if (v === null || v === undefined || isNaN(v)) return;
     if (s.min === null || v < s.min) s.min = v;
     if (s.max === null || v > s.max) s.max = v;
     s.sum += v; s.n++;
-    s.hist.push(v);
-    if (s.hist.length > SPARK_MAX) s.hist.shift();
   }
   function avg(s) { return s.n ? s.sum / s.n : null; }
 
-  function resetStats() {
-    stats = { temp: newStat(), press: newStat(), alt: newStat(), trend: newStat(), chip: newStat() };
-    samples = [];
-    ['spark-temp-box','spark-press-box','spark-alt-box','spark-fc-box'].forEach(function(id) {
-      document.getElementById(id).innerHTML = '<div class="spark-empty">collecting…</div>';
+  // ── Счётчики в localStorage ──────────────────────────
+  function finite(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
+  function edge(a, b, pick) { return a === null ? b : b === null ? a : pick(a, b); }
+
+  function readStats() {
+    try {
+      const o = JSON.parse(localStorage.getItem(STATS_KEY) || 'null');
+      return (o && typeof o === 'object') ? o : null;
+    } catch (e) { return null; }   // приватный режим или чужой мусор по ключу
+  }
+
+  // Возвращает true, если что-то восстановили: цифры на карточках окажутся
+  // старше открытой вкладки, и это стоит отметить в логе.
+  function restoreStats() {
+    const o = readStats();
+    if (!o) return false;
+    statsSince = finite(o.since) || statsSince;
+    let any = false;
+    STAT_KEYS.forEach(function(k) {
+      const src = o[k], dst = stats[k];
+      if (!src || typeof src !== 'object') return;
+      dst.min = finite(src.min);
+      dst.max = finite(src.max);
+      dst.n   = Math.max(0, Math.round(finite(src.n) || 0));
+      // Сумма без счёта — мусор: avg по ней даст деление на ноль.
+      dst.sum = dst.n ? (finite(src.sum) || 0) : 0;
+      if (dst.n || dst.min !== null) any = true;
     });
+    return any;
+  }
+
+  let statsSavedAt = 0;
+  function saveStats(force) {
+    const now = Date.now();
+    if (!force && now - statsSavedAt < STATS_SAVE_MS) return;
+    statsSavedAt = now;
+    // Соседняя вкладка копит те же цифры и пишет по тому же ключу. Сливаем:
+    // min/max — крайние из двух, сумму со счётом берём у того, кто видел
+    // больше отсчётов. Складывать суммы нельзя, поток обеим вкладкам идёт
+    // один и тот же, среднее уехало бы вдвое.
+    const o   = readStats() || {};
+    const out = { v: 1, since: Math.min(statsSince, finite(o.since) || statsSince) };
+    STAT_KEYS.forEach(function(k) {
+      const a  = stats[k];
+      const b  = (o[k] && typeof o[k] === 'object') ? o[k] : {};
+      const bn = Math.max(0, Math.round(finite(b.n) || 0));
+      out[k] = {
+        min: edge(a.min, finite(b.min), Math.min),
+        max: edge(a.max, finite(b.max), Math.max),
+        sum: bn > a.n ? (finite(b.sum) || 0) : a.sum,
+        n:   Math.max(a.n, bn)
+      };
+    });
+    try { localStorage.setItem(STATS_KEY, JSON.stringify(out)); } catch (e) {}
+  }
+
+  // Вкладку закрывают и прячут чаще, чем раз в STATS_SAVE_MS, — досохраняем.
+  // pagehide вместо beforeunload: на мобильных вкладка уходит в фон, минуя его.
+  window.addEventListener('pagehide', function() { saveStats(true); });
+  document.addEventListener('visibilitychange', function() { if (document.hidden) saveStats(true); });
+
+  // Сброс в соседней вкладке — ключ исчез. Без этого наша копия при следующем
+  // сохранении вернула бы стёртые цифры обратно, и кнопка Reset выглядела бы
+  // сломанной: нажали в одной вкладке, через пять секунд минимум снова старый.
+  window.addEventListener('storage', function(e) {
+    if (e.key !== STATS_KEY || e.newValue !== null) return;
+    stats      = newStats();
+    statsSince = Date.now();
+    if (lastD) { ingest(lastD); render(lastD); }
+  });
+
+  function resetStats() {
+    stats        = newStats();
+    samples      = [];
+    statsSince   = Date.now();
+    statsSavedAt = 0;
+    try { localStorage.removeItem(STATS_KEY); } catch (e) {}
+    // Графики не трогаем: они больше не наши, а прошивкины. Кнопка сбрасывает
+    // счётчики вкладки, а измерения устройства ей не принадлежат — раньше
+    // вместе с min/max стиралась и вся видимая история.
     if (lastD) { ingest(lastD); render(lastD); }
     logEvent('info', 'Min/avg/max counters reset');
     showToast('Min/max reset');
   }
 
-  // ── Спарклайн (inline SVG, без внешних библиотек) ─────
-  function drawSpark(boxId, data, color, minSpan) {
-    const box = document.getElementById(boxId);
-    if (!data || data.length < 2) return;
-    const W = 300, H = 60, PAD = 4;
-    let lo = Math.min.apply(null, data), hi = Math.max.apply(null, data);
-    if (hi - lo < minSpan) { const mid = (hi + lo) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
-    const n = data.length;
-    const X = i => (i / (n - 1)) * W;
-    const Y = v => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
+  if (restoreStats()) {
+    // logEvent и его счётчик строк объявлены ниже по файлу: до конца разбора
+    // скрипта они в TDZ, и прямой вызов отсюда упал бы с ReferenceError.
+    setTimeout(function() {
+      logEvent('info', 'Min/avg/max restored — collecting since ' +
+                       new Date(statsSince).toLocaleString());
+    }, 0);
+  }
 
-    let d = 'M ' + X(0).toFixed(1) + ' ' + Y(data[0]).toFixed(1);
-    for (let i = 1; i < n; i++) {
-      const xm = ((X(i - 1) + X(i)) / 2).toFixed(1);
-      d += ' C ' + xm + ' ' + Y(data[i - 1]).toFixed(1) + ', ' +
-                   xm + ' ' + Y(data[i]).toFixed(1) + ', ' +
-                   X(i).toFixed(1) + ' ' + Y(data[i]).toFixed(1);
+  // ── Ряды для графиков ────────────────────────────────
+  // Историю ведёт прошивка (/api/history): точка на каждое чтение BMP280.
+  // Копить её из кадров WebSocket было нельзя — кадры идут раз в секунду,
+  // а датчик опрашивается раз в минуту, и шестьдесят кадров подряд несут
+  // одно и то же число. Отсюда и бралась ступенька: пять реальных измерений,
+  // размазанных по тремстам точкам графика.
+  //
+  // Живой хвост дорисовываем сами, ведром по SPARK_STEP_MS. Внутри ведра
+  // значения усредняются, поэтому повторы сжимаются в одну точку, а дрожание
+  // последнего разряда датчика гасится.
+  const SPARK_STEP_MS   = 60000;   // ведро живого хвоста ≈ период опроса датчика
+  const SPARK_KEEP      = 400;     // точек в ряду, лишнее вытесняется слева
+  const SPARK_DRAW_MAX  = 120;     // точек на отрисовку (см. thin)
+  const SPARK_REDRAW_MS = 5000;    // чаще перерисовывать нечего: точка раз в минуту
+
+  function newSeries() { return { temp: [], press: [], alt: [], trend: [] }; }
+  let series = newSeries();
+
+  // Точка ряда: { t: метка времени, v: значение | null (датчик молчал) }
+  function pushPoint(arr, v, now) {
+    if (v === null || v === undefined || isNaN(v)) return;
+    const t    = Math.floor(now / SPARK_STEP_MS) * SPARK_STEP_MS;
+    const last = arr[arr.length - 1];
+    // Условие t <= last.t, а не просто равенство: сетка ведра и метки из
+    // прошивки считаются от разных часов, и первая живая точка после
+    // /api/history может оказаться левее последней исторической. Порядок
+    // ряда дороже одной точки — влево не откатываемся, а доливаем в хвост.
+    if (last && t <= last.t) {
+      if (last.v === null) { last.v = v; last.n = 1; }
+      else { last.n++; last.v += (v - last.v) / last.n; }
+      return;
     }
+    arr.push({ t: t, v: v, n: 1 });
+    if (arr.length > SPARK_KEEP) arr.shift();
+  }
+
+  function spanText(ms) {
+    const m = Math.round(ms / 60000);
+    if (m < 60) return m + ' min';
+    const h = Math.floor(m / 60), r = m % 60;
+    return r ? h + 'h ' + r + 'm' : h + 'h';
+  }
+
+  // Возраст точек прошивка отдаёт в секундах назад от «сейчас», а не временем:
+  // её часы зависят от NTP, а разность millis() верна всегда — сводить их
+  // с часами браузера не приходится.
+  function seedHistory(j) {
+    if (!j || !j.n || !Array.isArray(j.age)) return 0;
+    const now  = Date.now();
+    const cols = { temp: j.temp, press: j.press, alt: j.alt, trend: j.trend };
+    const next = newSeries();
+    let span = 0;
+    Object.keys(next).forEach(function(k) {
+      const col = cols[k];
+      if (!Array.isArray(col)) return;
+      const n = Math.min(j.n, col.length, j.age.length);
+      for (let i = 0; i < n; i++) {
+        const v = (typeof col[i] === 'number' && isFinite(col[i])) ? col[i] : null;
+        next[k].push({ t: now - j.age[i] * 1000, v: v, n: 1 });
+      }
+      while (next[k].length > SPARK_KEEP) next[k].shift();
+      if (next[k].length) span = Math.max(span, now - next[k][0].t);
+    });
+    series = next;
+    return span;
+  }
+
+  let histPending = false;
+  function fetchHistory() {
+    if (histPending) return;
+    histPending = true;
+    fetch('/api/history')
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        const span = seedHistory(j);
+        drawSparks(true);
+        if (span > 0) logEvent('info', 'History loaded — ' + spanText(span) + ' of readings');
+      })
+      .catch(function() { logEvent('warn', 'History unavailable — charts start from now'); })
+      .finally(function() { histPending = false; });
+  }
+
+  // ── Спарклайн (inline SVG, без внешних библиотек) ─────
+  // Линия — монотонный кубический сплайн (Фрич–Карлсон): наклон в точке
+  // берётся по соседям и урезается там, где кривая иначе вылезла бы за их
+  // коридор. Раньше тут стояли безье с обеими опорными точками на середине
+  // отрезка — так рисуется не кривая, а ступенька со скруглёнными углами.
+  // Простой Catmull-Rom не годится по другой причине: на ровной полке
+  // с одиночным выбросом он даёт петлю ниже минимума ряда, и график
+  // показывал бы температуру, которой не было.
+  function splinePath(px, py) {
+    const n = px.length;
+    const f = function(v) { return v.toFixed(1); };
+    const h = [], d = [];
+    for (let i = 0; i < n - 1; i++) {
+      h[i] = Math.max(0.001, px[i + 1] - px[i]);   // ноль по X — деление на ноль
+      d[i] = (py[i + 1] - py[i]) / h[i];
+    }
+    const m = [d[0]];
+    for (let i = 1; i < n - 1; i++) {
+      // Смена знака секущих — локальный экстремум: наклон 0, иначе кривая
+      // проскочит мимо точки и нарисует несуществующий пик.
+      m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+    }
+    m[n - 1] = d[n - 2];
+    for (let i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }   // полка остаётся полкой
+      const a = m[i] / d[i], b = m[i + 1] / d[i], q = a * a + b * b;
+      if (q > 9) { const k = 3 / Math.sqrt(q); m[i] = k * a * d[i]; m[i + 1] = k * b * d[i]; }
+    }
+    let path = 'M ' + f(px[0]) + ' ' + f(py[0]);
+    for (let i = 0; i < n - 1; i++) {
+      const c = h[i] / 3;
+      path += ' C ' + f(px[i] + c)         + ' ' + f(py[i] + m[i] * c)         + ', ' +
+                      f(px[i + 1] - c)     + ' ' + f(py[i + 1] - m[i + 1] * c) + ', ' +
+                      f(px[i + 1])         + ' ' + f(py[i + 1]);
+    }
+    return path;
+  }
+
+  // Больше сотни точек на 300 единиц ширины — это шум пиксельного масштаба:
+  // сегменты короче линии, которой они нарисованы, и сглаживать там уже нечего.
+  // Схлопываем группы средним — заодно уходит дрожание младшего разряда датчика.
+  function thin(run, max) {
+    if (run.length <= max) return run;
+    const k = Math.ceil(run.length / max), out = [];
+    for (let i = 0; i < run.length; i += k) {
+      let st = 0, sv = 0, cnt = 0;
+      for (let j = i; j < i + k && j < run.length; j++) { st += run[j].t; sv += run[j].v; cnt++; }
+      out.push({ t: st / cnt, v: sv / cnt });
+    }
+    return out;
+  }
+
+  function drawSpark(boxId, pts, color, minSpan) {
+    const box   = document.getElementById(boxId);
+    const range = document.getElementById(boxId.replace('-box', '-range'));
+    const real  = pts.filter(function(p) { return p.v !== null; });
+    if (real.length < 2) {
+      box.innerHTML = '<div class="spark-empty">collecting…</div>';
+      if (range) range.textContent = '';
+      return;
+    }
+
+    const W = 300, H = 60, PAD = 4;
+    let lo = Infinity, hi = -Infinity;
+    real.forEach(function(p) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; });
+    if (hi - lo < minSpan) { const mid = (hi + lo) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
+
+    // Ось X — время, а не номер точки: пауза в данных (сон, потеря связи)
+    // должна выглядеть паузой, иначе график врёт о том, когда что мерилось.
+    const t0 = pts[0].t, dt = Math.max(1, pts[pts.length - 1].t - t0);
+    const X  = function(p) { return ((p.t - t0) / dt) * W; };
+    const Y  = function(v) { return PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2); };
+
+    // Дырки рвут линию, а не сшиваются прямой: прямая через час без данных
+    // читается как измерения, которых не было.
+    const runs = [];
+    let cur = [];
+    pts.forEach(function(p) {
+      if (p.v === null) { if (cur.length) runs.push(cur); cur = []; }
+      else cur.push(p);
+    });
+    if (cur.length) runs.push(cur);
+
     const gid = 'g-' + boxId;
+    let body = '';
+    runs.forEach(function(run) {
+      const r = thin(run, SPARK_DRAW_MAX);
+      if (r.length < 2) return;
+      const px = r.map(X), py = r.map(function(p) { return Y(p.v); });
+      const path = splinePath(px, py);
+      body += '<path d="' + path + ' L ' + px[px.length - 1].toFixed(1) + ' ' + H +
+              ' L ' + px[0].toFixed(1) + ' ' + H + ' Z" fill="url(#' + gid + ')"/>' +
+              '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="1.8" ' +
+              'stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>';
+    });
+
     box.innerHTML =
       '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' +
       '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
       '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.38"/>' +
       '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"/>' +
-      '</linearGradient></defs>' +
-      '<path d="' + d + ' L ' + W + ' ' + H + ' L 0 ' + H + ' Z" fill="url(#' + gid + ')"/>' +
-      '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.8" ' +
-      'stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+      '</linearGradient></defs>' + body +
       '</svg>';
+    if (range) range.textContent = spanText(pts[pts.length - 1].t - t0);
   }
+
+  // Четыре SVG строками — не та работа, которую стоит делать раз в секунду,
+  // когда точка появляется раз в минуту. force — для случаев, когда данные
+  // сменились разом (пришла история из прошивки).
+  let sparksDrawnAt = 0;
+  function drawSparks(force) {
+    const now = Date.now();
+    if (!force && now - sparksDrawnAt < SPARK_REDRAW_MS) return;
+    sparksDrawnAt = now;
+    const sl = cssVar('--s-line');
+    drawSpark('spark-temp-box',  series.temp,  sl, 0.5);
+    drawSpark('spark-press-box', series.press, sl, 1.0);
+    drawSpark('spark-alt-box',   series.alt,   sl, 5.0);
+    drawSpark('spark-fc-box',    series.trend, sl, 0.4);
+  }
+
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
@@ -1294,7 +1566,13 @@
     swServerSynced = false;   // при новом коннекте заново берём состояние секундомера
     setWsStatus(false);       // пока не подключились — кнопки заблокированы
     ws = new WebSocket('ws://' + location.hostname + ':81/');
-    ws.onopen    = () => { setWsStatus(true); clearTimeout(wsReconnectTimer); logEvent('ok', 'WebSocket connected'); };
+    ws.onopen    = () => {
+      setWsStatus(true); clearTimeout(wsReconnectTimer); logEvent('ok', 'WebSocket connected');
+      // Именно на каждом коннекте, а не только при загрузке страницы: пока
+      // связи не было, прошивка мерила дальше — переподключение обязано
+      // подобрать этот кусок, иначе в графике останется дырка.
+      fetchHistory();
+    };
     ws.onmessage = (e) => {
       if (typeof e.data === 'string' && e.data.startsWith('pong:')) { swOnPong(e.data); return; }
       try {
@@ -1339,6 +1617,7 @@
 
   // ── Приём данных: копим статистику и историю ─────────
   let prevBmpValid = true, prevBatLow = false, prevForecast = -1, prevRamWarn = false;
+  let resetLogged  = false;
 
   function ingest(d) {
     if (d.bmp_valid) {
@@ -1346,9 +1625,17 @@
       pushStat(stats.press, d.pressure);
       pushStat(stats.alt,   d.altitude);
       pushStat(stats.trend, d.trend);
+
+      const now = Date.now();
+      pushPoint(series.temp,  d.bmp_temp, now);
+      pushPoint(series.press, d.pressure, now);
+      pushPoint(series.alt,   d.altitude, now);
+      pushPoint(series.trend, d.trend,    now);
     }
     const chip = parseFloat(d.temp);
     if (!isNaN(chip)) pushStat(stats.chip, chip);
+
+    saveStats(false);   // сама решит, не рано ли писать (STATS_SAVE_MS)
 
     samples.push({
       time: d.time,
@@ -1366,6 +1653,10 @@
     if (samples.length > SAMPLE_MAX) samples.shift();
 
     // ── События в лог (только по факту изменения) ──
+    if (!resetLogged && d.reset_reason !== undefined) {
+      resetLogged = true;
+      logEvent(d.reset_abnormal ? 'warn' : 'info', 'Last boot: ' + d.reset_reason + ' reset');
+    }
     if (d.bmp_valid !== prevBmpValid) {
       logEvent(d.bmp_valid ? 'ok' : 'error',
                d.bmp_valid ? 'BMP280 sensor online' : 'BMP280 not responding');
@@ -1428,6 +1719,13 @@
     document.getElementById('ssid').textContent         = d.ssid;
     document.getElementById('ip').textContent           = d.ip;
     document.getElementById('clients-val').textContent  = d.clients;
+
+    if (d.reset_reason !== undefined) {
+      const rr = document.getElementById('reset-reason');
+      rr.textContent = 'boot: ' + d.reset_reason;
+      rr.style.color = d.reset_abnormal ? 'var(--crit)' : '';
+    }
+
     document.getElementById('rssi-val').textContent     = d.rssi;
     document.getElementById('rssi-quality').textContent = rssiQuality(d.rssi);
     document.getElementById('req-count').textContent    = Number(d.requests).toLocaleString();
@@ -1462,11 +1760,7 @@
       : d.trend < -0.5 ? 'Pressure falling — weather may turn'
       : 'Barometric change over the last hour';
 
-      const sl = cssVar('--s-line');
-      drawSpark('spark-temp-box',  stats.temp.hist,  sl, 0.5);
-      drawSpark('spark-press-box', stats.press.hist, sl, 1.0);
-      drawSpark('spark-alt-box',   stats.alt.hist,   sl, 5.0);
-      drawSpark('spark-fc-box',    stats.trend.hist, sl, 0.4);
+      drawSparks(false);
     } else {
       ['mt-val','mt-min','mt-avg','mt-max','mp-val','mp-min','mp-avg','mp-max','ma-val','mf-val']
         .forEach(id => { document.getElementById(id).textContent = '—'; });
@@ -1620,6 +1914,7 @@
     const out = {
       exported_at: deviceTime,
       host: location.hostname,
+      stats_since: new Date(statsSince).toISOString(),
       stats: {
         temp:  { min: stats.temp.min,  avg: avg(stats.temp),  max: stats.temp.max,  unit: 'C' },
         press: { min: stats.press.min, avg: avg(stats.press), max: stats.press.max, unit: 'hPa' },

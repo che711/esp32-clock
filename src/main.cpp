@@ -21,6 +21,7 @@
 SensorData  weather{};
 BatteryData battery{};
 Stopwatch   stopwatch;
+TrendHistory trendHistory;
 
 char   timeBuf[9];
 char   dateBuf[20];
@@ -29,7 +30,17 @@ char   dayFullBuf[12];
 bool   timeSynced = false;
 String localIP    = "";
 
-static uint32_t lastSensorMs = 0;
+// Точка истории кладётся ровно там, где датчик прочитан, — и только там.
+// Копить её из broadcast-кадров нельзя: те уходят раз в секунду и минуту
+// подряд несут одно и то же число, из чего график получался ступенчатым.
+static void historyPush(uint32_t nowMs) {
+    trendHistory.push(nowMs, weather.valid, weather.temperature,
+                      weather.pressure, weather.altitude, weather.pressureTrend);
+}
+
+static uint32_t lastSensorMs  = 0;
+static int      lastSensorMin = -1;   // минута последнего замера, -1 — ещё не мерили
+
 // Взводится, когда кадр надо перерисовать не дожидаясь смены секунды
 static bool     forceRedraw  = false;
 
@@ -474,6 +485,31 @@ static void ledBlink(uint8_t r, uint8_t g, uint8_t b) {
     ledBlinking   = true;
 }
 
+// Пора ли опрашивать датчик. Замер привязан к началу минуты по часам, а не
+// к моменту включения: раньше интервал отсчитывался от millis() загрузки, и
+// показания обновлялись в произвольную секунду (12:34:17, 12:35:17 …).
+// Сравнить их с чем-то по времени было нельзя, а точки графика ложились
+// вразнобой относительно минут.
+static bool sensorDue(uint32_t nowMs) {
+    struct tm t;
+    if (!localTimeNow(&t)) {
+        // NTP ещё не ответил — минут у нас нет, работает прежний отсчёт
+        // от millis(). Иначе датчик молчал бы до синхронизации.
+        return nowMs - lastSensorMs >= powerSensorIntervalMs();
+    }
+    if (t.tm_min == lastSensorMin) return false;   // в эту минуту уже мерили
+
+    // В экономе опрос раз в две минуты — берём чётные, чтобы момент замера
+    // не зависел от того, когда устройство включили. Ноль в делителе тут
+    // означал бы деление на ноль, поэтому шаг не опускается ниже минуты.
+    uint32_t everyMin = powerSensorIntervalMs() / 60000UL;
+    if (everyMin < 1) everyMin = 1;
+    if ((uint32_t)t.tm_min % everyMin != 0) return false;
+
+    lastSensorMin = t.tm_min;
+    return true;
+}
+
 static void updateWeather() {
     uint32_t now = millis();
 
@@ -489,9 +525,10 @@ static void updateWeather() {
 
     // Погоду спрашиваем редко: температура и давление за минуту никуда
     // не убегут, а каждый опрос I²C — это работа шины и ядра.
-    if (now - lastSensorMs >= powerSensorIntervalMs()) {
+    if (sensorDue(now)) {
         lastSensorMs = now;
         weather = sensorRead();
+        historyPush(now);
         // Профиль спрашиваем первым: в экономе индикация молчит вся, включая
         // аварийную. Раньше «датчик умер» стояло выше — и красный горел РОВНО,
         // то есть непрерывно, именно в режимах, заведённых ради экономии.
@@ -509,6 +546,50 @@ static void updateWeather() {
     }
 }
 
+// ── Причина последнего сброса ─────────────────────────────
+//  Перезагрузившиеся ночью часы выглядят в дашборде ровно как часы, которые
+//  не перезагружались: аптайм обнулился, и всё. А различать тут есть что —
+//  просадка питания на исходе банки, паника прошивки и сторожевой таймер
+//  требуют разных действий, и узнавать о них, подключившись к USB задним
+//  числом, поздно. Причина сброса переживает и brownout (в отличие от core
+//  dump: писать во флеш на падающем питании уже нечем), поэтому она едет
+//  в снимок и оседает в журнале дашборда.
+static esp_reset_reason_t bootReason = ESP_RST_UNKNOWN;
+
+const char* resetReasonName() {
+    switch (bootReason) {
+        case ESP_RST_POWERON:    return "power-on";
+        case ESP_RST_EXT:        return "external pin";
+        case ESP_RST_SW:         return "software";      // ESP.restart(), в т.ч. /api/reboot
+        case ESP_RST_PANIC:      return "panic";
+        case ESP_RST_INT_WDT:    return "interrupt watchdog";
+        case ESP_RST_TASK_WDT:   return "task watchdog";
+        case ESP_RST_WDT:        return "watchdog";
+        case ESP_RST_DEEPSLEEP:  return "deep sleep";
+        case ESP_RST_BROWNOUT:   return "brownout";
+        case ESP_RST_SDIO:       return "SDIO";
+        case ESP_RST_USB:        return "USB";
+        case ESP_RST_JTAG:       return "JTAG";
+        case ESP_RST_EFUSE:      return "efuse error";
+        case ESP_RST_PWR_GLITCH: return "power glitch";
+        case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+        default:                 return "unknown";
+    }
+}
+
+// Штатное — это включили питание, нажали reset, перезагрузились по своей же
+// команде, проснулись из сна. Всё прочее авария, и дашборд поднимет её в
+// журнале до warn, вместо того чтобы утопить в потоке info.
+bool resetWasAbnormal() {
+    switch (bootReason) {
+        case ESP_RST_POWERON:
+        case ESP_RST_EXT:
+        case ESP_RST_SW:
+        case ESP_RST_DEEPSLEEP: return false;
+        default:                return true;
+    }
+}
+
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
@@ -520,6 +601,9 @@ void setup() {
     delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
 
     Serial.println("\n=== ESP32-C6 Clock + Weather boot ===");
+    bootReason = esp_reset_reason();
+    Serial.printf("Reset reason: %s%s\n", resetReasonName(),
+                  resetWasAbnormal() ? "  <-- аварийный" : "");
     ledColor(0, 0, 5);   // dim синий на старте
 
     // 80 МГц вместо 160: для часов + веб-сервера хватает с запасом,
@@ -552,6 +636,7 @@ void setup() {
     }
 
     weather = sensorRead();
+    historyPush(millis());
 
     displayBegin();
     displaySplash("Connecting WiFi...");
