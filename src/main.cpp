@@ -21,6 +21,7 @@
 SensorData  weather{};
 BatteryData battery{};
 Stopwatch   stopwatch;
+TrendHistory trendHistory;
 
 char   timeBuf[9];
 char   dateBuf[20];
@@ -28,6 +29,14 @@ char   dayShortBuf[5];
 char   dayFullBuf[12];
 bool   timeSynced = false;
 String localIP    = "";
+
+// Точка истории кладётся ровно там, где датчик прочитан, — и только там.
+// Копить её из broadcast-кадров нельзя: те уходят раз в секунду и минуту
+// подряд несут одно и то же число, из чего график получался ступенчатым.
+static void historyPush(uint32_t nowMs) {
+    trendHistory.push(nowMs, weather.valid, weather.temperature,
+                      weather.pressure, weather.altitude, weather.pressureTrend);
+}
 
 static uint32_t lastSensorMs = 0;
 // Взводится, когда кадр надо перерисовать не дожидаясь смены секунды
@@ -492,6 +501,7 @@ static void updateWeather() {
     if (now - lastSensorMs >= powerSensorIntervalMs()) {
         lastSensorMs = now;
         weather = sensorRead();
+        historyPush(now);
         // Профиль спрашиваем первым: в экономе индикация молчит вся, включая
         // аварийную. Раньше «датчик умер» стояло выше — и красный горел РОВНО,
         // то есть непрерывно, именно в режимах, заведённых ради экономии.
@@ -509,6 +519,50 @@ static void updateWeather() {
     }
 }
 
+// ── Причина последнего сброса ─────────────────────────────
+//  Перезагрузившиеся ночью часы выглядят в дашборде ровно как часы, которые
+//  не перезагружались: аптайм обнулился, и всё. А различать тут есть что —
+//  просадка питания на исходе банки, паника прошивки и сторожевой таймер
+//  требуют разных действий, и узнавать о них, подключившись к USB задним
+//  числом, поздно. Причина сброса переживает и brownout (в отличие от core
+//  dump: писать во флеш на падающем питании уже нечем), поэтому она едет
+//  в снимок и оседает в журнале дашборда.
+static esp_reset_reason_t bootReason = ESP_RST_UNKNOWN;
+
+const char* resetReasonName() {
+    switch (bootReason) {
+        case ESP_RST_POWERON:    return "power-on";
+        case ESP_RST_EXT:        return "external pin";
+        case ESP_RST_SW:         return "software";      // ESP.restart(), в т.ч. /api/reboot
+        case ESP_RST_PANIC:      return "panic";
+        case ESP_RST_INT_WDT:    return "interrupt watchdog";
+        case ESP_RST_TASK_WDT:   return "task watchdog";
+        case ESP_RST_WDT:        return "watchdog";
+        case ESP_RST_DEEPSLEEP:  return "deep sleep";
+        case ESP_RST_BROWNOUT:   return "brownout";
+        case ESP_RST_SDIO:       return "SDIO";
+        case ESP_RST_USB:        return "USB";
+        case ESP_RST_JTAG:       return "JTAG";
+        case ESP_RST_EFUSE:      return "efuse error";
+        case ESP_RST_PWR_GLITCH: return "power glitch";
+        case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+        default:                 return "unknown";
+    }
+}
+
+// Штатное — это включили питание, нажали reset, перезагрузились по своей же
+// команде, проснулись из сна. Всё прочее авария, и дашборд поднимет её в
+// журнале до warn, вместо того чтобы утопить в потоке info.
+bool resetWasAbnormal() {
+    switch (bootReason) {
+        case ESP_RST_POWERON:
+        case ESP_RST_EXT:
+        case ESP_RST_SW:
+        case ESP_RST_DEEPSLEEP: return false;
+        default:                return true;
+    }
+}
+
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
@@ -520,6 +574,9 @@ void setup() {
     delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
 
     Serial.println("\n=== ESP32-C6 Clock + Weather boot ===");
+    bootReason = esp_reset_reason();
+    Serial.printf("Reset reason: %s%s\n", resetReasonName(),
+                  resetWasAbnormal() ? "  <-- аварийный" : "");
     ledColor(0, 0, 5);   // dim синий на старте
 
     // 80 МГц вместо 160: для часов + веб-сервера хватает с запасом,
@@ -552,6 +609,7 @@ void setup() {
     }
 
     weather = sensorRead();
+    historyPush(millis());
 
     displayBegin();
     displaySplash("Connecting WiFi...");

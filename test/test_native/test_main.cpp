@@ -6,6 +6,7 @@
 #include "../../src/battery_calc.h"
 #include "../../src/power_calc.h"
 #include "../../src/weather_calc.h"
+#include "../../src/history.h"
 #include "../../src/stopwatch.h"
 #include "../../src/origin_check.h"
 
@@ -898,6 +899,76 @@ void test_history_wraps_full_window() {
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 54.55f, h.trendPerHour());
 }
 
+// ─── История показаний для графиков ───────────────────────
+void test_trendlog_empty() {
+    TrendHistory h;
+    TEST_ASSERT_EQUAL_UINT16(0, h.size());
+}
+
+// Порядок обхода: at(0) — самая старая точка, at(size()-1) — свежая
+void test_trendlog_keeps_order() {
+    TrendHistory h;
+    for (int i = 0; i < 3; i++)
+        h.push((uint32_t)i * 60000, true, 20.0f + i, 1000.0f + i, 100.0f + i, 0.5f);
+
+    TEST_ASSERT_EQUAL_UINT16(3, h.size());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.0f, h.at(0).temp);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 22.0f, h.at(2).temp);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1002.0f, h.at(2).press);
+}
+
+// Переполнение кольца: остаётся хвост, а не голова
+void test_trendlog_wraps_to_newest() {
+    TrendHistory h;
+    const int extra = 5;
+    for (int i = 0; i < TREND_HISTORY_SIZE + extra; i++)
+        h.push((uint32_t)i * 60000, true, (float)i, 1000.0f, 100.0f, 0.0f);
+
+    TEST_ASSERT_EQUAL_UINT16(TREND_HISTORY_SIZE, h.size());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, (float)extra, h.at(0).temp);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, (float)(TREND_HISTORY_SIZE + extra - 1),
+                             h.at(h.size() - 1).temp);
+}
+
+// Молчащий датчик — дырка в графике, а не ноль и не прошлое значение:
+// нулевая температура среди двадцати градусов испортила бы и линию, и масштаб
+void test_trendlog_invalid_is_nan() {
+    TrendHistory h;
+    h.push(0, true, 21.0f, 1013.0f, 120.0f, 0.4f);
+    h.push(60000, false, 21.0f, 1013.0f, 120.0f, 0.4f);
+
+    TEST_ASSERT_FALSE(isnan(h.at(0).temp));
+    TEST_ASSERT_TRUE(isnan(h.at(1).temp));
+    TEST_ASSERT_TRUE(isnan(h.at(1).press));
+    TEST_ASSERT_TRUE(isnan(h.at(1).alt));
+    TEST_ASSERT_TRUE(isnan(h.at(1).trend));
+}
+
+void test_trendlog_age_seconds() {
+    TrendHistory h;
+    h.push(1000, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+    h.push(61000, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+
+    TEST_ASSERT_EQUAL_UINT32(120, h.ageS(0, 121000));
+    TEST_ASSERT_EQUAL_UINT32(60,  h.ageS(1, 121000));
+}
+
+// millis() переполняется раз в 49 суток. Возраст считается беззнаковой
+// разностью и переживает это; храни мы абсолютное время — график в этот
+// момент прыгнул бы на полвека вперёд.
+void test_trendlog_age_survives_millis_overflow() {
+    TrendHistory h;
+    h.push(0xFFFFFF00UL, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+    TEST_ASSERT_EQUAL_UINT32(60, h.ageS(0, 0xFFFFFF00UL + 60000UL));
+}
+
+void test_trendlog_clear() {
+    TrendHistory h;
+    h.push(0, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+    h.clear();
+    TEST_ASSERT_EQUAL_UINT16(0, h.size());
+}
+
 // ─── Метео: прогноз ───────────────────────────────────────
 void test_forecast_needs_history() {
     TEST_ASSERT_EQUAL_UINT8(0, forecastFromTrend(1.0f, 2));
@@ -1151,6 +1222,14 @@ int main(int argc, char** argv) {
     RUN_TEST(test_history_trend_falling);
     RUN_TEST(test_history_trend_needs_time_base);
     RUN_TEST(test_history_wraps_full_window);
+
+    RUN_TEST(test_trendlog_empty);
+    RUN_TEST(test_trendlog_keeps_order);
+    RUN_TEST(test_trendlog_wraps_to_newest);
+    RUN_TEST(test_trendlog_invalid_is_nan);
+    RUN_TEST(test_trendlog_age_seconds);
+    RUN_TEST(test_trendlog_age_survives_millis_overflow);
+    RUN_TEST(test_trendlog_clear);
 
     RUN_TEST(test_forecast_needs_history);
     RUN_TEST(test_forecast_clear);
