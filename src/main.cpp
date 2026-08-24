@@ -38,7 +38,9 @@ static void historyPush(uint32_t nowMs) {
                       weather.pressure, weather.altitude, weather.pressureTrend);
 }
 
-static uint32_t lastSensorMs = 0;
+static uint32_t lastSensorMs  = 0;
+static int      lastSensorMin = -1;   // минута последнего замера, -1 — ещё не мерили
+
 // Взводится, когда кадр надо перерисовать не дожидаясь смены секунды
 static bool     forceRedraw  = false;
 
@@ -483,6 +485,31 @@ static void ledBlink(uint8_t r, uint8_t g, uint8_t b) {
     ledBlinking   = true;
 }
 
+// Пора ли опрашивать датчик. Замер привязан к началу минуты по часам, а не
+// к моменту включения: раньше интервал отсчитывался от millis() загрузки, и
+// показания обновлялись в произвольную секунду (12:34:17, 12:35:17 …).
+// Сравнить их с чем-то по времени было нельзя, а точки графика ложились
+// вразнобой относительно минут.
+static bool sensorDue(uint32_t nowMs) {
+    struct tm t;
+    if (!localTimeNow(&t)) {
+        // NTP ещё не ответил — минут у нас нет, работает прежний отсчёт
+        // от millis(). Иначе датчик молчал бы до синхронизации.
+        return nowMs - lastSensorMs >= powerSensorIntervalMs();
+    }
+    if (t.tm_min == lastSensorMin) return false;   // в эту минуту уже мерили
+
+    // В экономе опрос раз в две минуты — берём чётные, чтобы момент замера
+    // не зависел от того, когда устройство включили. Ноль в делителе тут
+    // означал бы деление на ноль, поэтому шаг не опускается ниже минуты.
+    uint32_t everyMin = powerSensorIntervalMs() / 60000UL;
+    if (everyMin < 1) everyMin = 1;
+    if ((uint32_t)t.tm_min % everyMin != 0) return false;
+
+    lastSensorMin = t.tm_min;
+    return true;
+}
+
 static void updateWeather() {
     uint32_t now = millis();
 
@@ -498,7 +525,7 @@ static void updateWeather() {
 
     // Погоду спрашиваем редко: температура и давление за минуту никуда
     // не убегут, а каждый опрос I²C — это работа шины и ядра.
-    if (now - lastSensorMs >= powerSensorIntervalMs()) {
+    if (sensorDue(now)) {
         lastSensorMs = now;
         weather = sensorRead();
         historyPush(now);
