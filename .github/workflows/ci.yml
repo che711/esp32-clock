@@ -32,6 +32,13 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
+      # cppcheck нужен тесту test_lint: без него тот пропускает себя, и
+      # статический анализ в CI не выполнялся бы вовсе. Отдельной работы
+      # Lint больше нет — проверка живёт там же, где остальные тесты,
+      # и запускается тем же scripts/lint.sh, что и локально.
+      - name: Install cppcheck
+        run: sudo apt-get install -y cppcheck
+
       - name: Run native tests
         run: pio test -e native --verbose
 
@@ -67,18 +74,3 @@ jobs:
             .pio/build/esp32c6/firmware.bin
             .pio/build/esp32c6/firmware.elf
           retention-days: 30
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install cppcheck
-        run: sudo apt-get install -y cppcheck
-
-      # Флаги и подавления живут в scripts/lint.sh, а не здесь: ту же
-      # проверку надо уметь прогнать локально до пуша, а не узнавать
-      # о замечании из упавшей работы.
-      - name: Run cppcheck
-        run: ./scripts/lint.sh
