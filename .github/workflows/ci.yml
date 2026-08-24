@@ -77,19 +77,8 @@ jobs:
       - name: Install cppcheck
         run: sudo apt-get install -y cppcheck
 
-      # Проверяем весь src/, а не пару файлов: раньше main.cpp, sensor.cpp,
-      # battery.cpp и mqtt.cpp не смотрел никто.
-      # cstyleCast — по всему Arduino-API (payload у WebSockets это uint8_t*,
-      # приведения к char* неизбежны), поэтому подавлен осознанно.
+      # Флаги и подавления живут в scripts/lint.sh, а не здесь: ту же
+      # проверку надо уметь прогнать локально до пуша, а не узнавать
+      # о замечании из упавшей работы.
       - name: Run cppcheck
-        run: |
-          cppcheck \
-            --enable=warning,style,performance \
-            --suppress=missingIncludeSystem \
-            --suppress=unusedFunction \
-            --suppress=invalidPrintfArgType_sint \
-            --suppress=cstyleCast \
-            --error-exitcode=1 \
-            --inline-suppr \
-            src/ \
-            test/test_native/test_main.cpp
+        run: ./scripts/lint.sh
