@@ -5,6 +5,7 @@
 #include "display_calc.h"
 #include <U8g2lib.h>
 #include <SPI.h>
+#include <time.h>
 
 // ============================================================
 //  display.cpp — всё, что знает про геометрию экрана.
@@ -180,7 +181,14 @@ static int drawBattIcon(int x, int yTop, uint8_t pct) {
 // Рамка и перечёркивание в две линии: одиночная на 256×64 при низком
 // контрасте теряется, особенно под наклоном.
 static void drawBattWarn(int xLeft, int avail) {
-    const int w = 44, h = 24, nub = 3;
+    // −10 % к прежним 44×24: знак и без того крупнейший объект левого поля,
+    // а лишний воздух вокруг него читается лучше, чем лишние пиксели в нём.
+    // Носик остался 3: 2.7 округлять некуда, а 2 px — это уже минус треть.
+    const int w = 40, h = 22, nub = 3;
+    // Перечёркивание выходит за габарит на столько с каждого конца. Пока оно
+    // упиралось в рамку изнутри, диагональ читалась как деталь самой батареи
+    // (шкала заряда наискось); вылет за контур ни с чем не спутать.
+    const int over = 4;
     int x = xLeft + (avail - (w + nub)) / 2;
     int y = TEMP_BASELINE - h;
 
@@ -188,8 +196,22 @@ static void drawBattWarn(int xLeft, int avail) {
     u8g2.drawFrame(x + 1, y + 1, w - 2, h - 2);
     u8g2.drawBox(x + w, y + h / 2 - 4, nub, 8);          // носик
 
-    u8g2.drawLine(x + 4, y + h - 4, x + w - 5, y + 3);   // перечёркивание
-    u8g2.drawLine(x + 5, y + h - 4, x + w - 4, y + 3);
+    // Из-под левого нижнего угла в правый верхний и дальше наружу, над
+    // носиком: диагональ упирается ровно в углы рамки, так что вылет виден
+    // с обеих сторон, а носик не съедает верхний конец линии.
+    int x0 = x - over,            y0 = y + h - 1 + over;
+    int x1 = x + w + nub + over,  y1 = y - over;
+    u8g2.drawLine(x0,     y0, x1 - 1, y1);              // перечёркивание
+    u8g2.drawLine(x0 + 1, y0, x1,     y1);
+}
+
+// Фаза мигания знака разряда — общая для крупного знака и иконки в строке
+// статуса: если бы они мигали вразнобой, это читалось бы как неисправность
+// экрана, а не как тревога. Секунду кадра берём из time(), а не из millis():
+// почему именно так — в display_calc.h.
+static bool battWarnPhaseOn() {
+    return battWarnVisible(battery.percent, (uint32_t)time(nullptr),
+                           BATTERY_BLINK_PCT);
 }
 
 // Нижняя строка: сегменты через точку слева, батарея справа.
@@ -237,7 +259,11 @@ static void drawBottomStatus(const char* mark, bool withDate, bool withTemp) {
         // Своё имя, а не x: батарея прижата к правому краю независимо
         // от курсора сегментов выше, и путать их не стоит.
         int xBat   = 256 - totalW - 2;
-        drawBattIcon(xBat, 56, battery.percent);  // верх 56 → низ 62, вровень с текстом
+        // Ниже BATTERY_BLINK_PCT иконка мигает вместе с крупным знаком, а
+        // проценты рядом остаются на месте: числу мигание только мешает
+        // читаться, да и место под него всё равно занято.
+        if (battWarnPhaseOn())
+            drawBattIcon(xBat, 56, battery.percent);  // верх 56 → низ 62, вровень с текстом
         u8g2.drawStr(xBat + iconW + 3, 63, pctStr);
         textLimit = xBat - 4;                     // воздух между текстом и иконкой
     }
@@ -332,8 +358,11 @@ void displayDraw() {
         int leftW = xSep - SEP_GAP - CLOCK_MARGIN;
 
         if (battery.valid && battery.percent <= BATTERY_CRITICAL_PCT) {
-            // Заряд на исходе — вместо погоды предупреждение
-            drawBattWarn(CLOCK_MARGIN, leftW);
+            // Заряд на исходе — вместо погоды предупреждение, а ниже
+            // BATTERY_BLINK_PCT ещё и мигающее. Температура в этой фазе не
+            // возвращается: поле должно оставаться пустым, иначе мигание
+            // выглядело бы как перескок между двумя показаниями.
+            if (battWarnPhaseOn()) drawBattWarn(CLOCK_MARGIN, leftW);
         } else {
             // Знак градуса — кружком: в наборе _tr символа ° нет.
             char tstr[8];
