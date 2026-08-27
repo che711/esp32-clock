@@ -45,7 +45,6 @@
     /* Акцентные цвета метрик (полоска сверху карточки + график) */
     --c-temp:  #f0a45c;  --c-temp2:  #f7c88f;  --c-temp-soft:  rgba(240,164,92,0.13);
     --c-press: #6b9bff;  --c-press2: #9dc0ff;  --c-press-soft: rgba(107,155,255,0.13);
-    --c-alt:   #ef7a5c;  --c-alt2:   #f8a98f;  --c-alt-soft:   rgba(239,122,92,0.13);
     --c-fc:    #5cc389;  --c-fc2:    #8fdcb1;  --c-fc-soft:    rgba(92,195,137,0.13);
 
     /* Заливка плашки метрики: концы градиента. Отдельно от --c-*, потому что
@@ -55,7 +54,6 @@
        как цветной объект, а не светить в глаза ночью. */
     --g-temp:  #6d3d18;  --g-temp2:  #b57431;
     --g-press: #1e3468;  --g-press2: #3a63b8;
-    --g-alt:   #6b2a3c;  --g-alt2:   #b04f66;
     --g-fc:    #174c38;  --g-fc2:    #2f875f;
     --g-clock: #1d2450;  --g-clock2: #3c4a93;
 
@@ -101,14 +99,12 @@
     /* Плашки метрик: заливка целиком, поэтому пары — концы градиента */
     --c-temp:  #8b7ae8;  --c-temp2:  #b3a6f2;  --c-temp-soft:  rgba(139,122,232,0.16);
     --c-press: #35b3dd;  --c-press2: #3fd2c4;  --c-press-soft: rgba(53,179,221,0.16);
-    --c-alt:   #f0617e;  --c-alt2:   #f79fb0;  --c-alt-soft:   rgba(240,97,126,0.16);
     --c-fc:    #f3a337;  --c-fc2:    #f8d449;  --c-fc-soft:    rgba(243,163,55,0.16);
 
     /* В светлой теме заливка и есть акцентный цвет — он там достаточно
        светлый, чтобы белый текст на нём читался. */
     --g-temp:  var(--c-temp);   --g-temp2:  var(--c-temp2);
     --g-press: var(--c-press);  --g-press2: var(--c-press2);
-    --g-alt:   var(--c-alt);    --g-alt2:   var(--c-alt2);
     --g-fc:    var(--c-fc);     --g-fc2:    var(--c-fc2);
     --g-clock: #5f57cf;         --g-clock2: #8a7bec;
 
@@ -227,7 +223,6 @@
   }
   .m-temp  { --g: var(--g-temp);  --g2: var(--g-temp2);  }
   .m-press { --g: var(--g-press); --g2: var(--g-press2); }
-  .m-alt   { --g: var(--g-alt);   --g2: var(--g-alt2);   }
   .m-fc    { --g: var(--g-fc);    --g2: var(--g-fc2);    }
   .clock-card { --g: var(--g-clock); --g2: var(--g-clock2); }
 
@@ -315,10 +310,11 @@
 
   /* ── Сетка метрик ── */
   .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  /* Карточек нечётное число: последняя иначе висит половинкой рядом с дырой. */
+  .metric-grid > .metric-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .metric-card { display: flex; flex-direction: column; gap: 13px; padding: 19px 19px 17px; }
   .m-temp  { --c: var(--c-temp);  --c2: var(--c-temp2);  --c-soft: var(--c-temp-soft);  }
   .m-press { --c: var(--c-press); --c2: var(--c-press2); --c-soft: var(--c-press-soft); }
-  .m-alt   { --c: var(--c-alt);   --c2: var(--c-alt2);   --c-soft: var(--c-alt-soft);   }
   .m-fc    { --c: var(--c-fc);    --c2: var(--c-fc2);    --c-soft: var(--c-fc-soft);    }
 
   .m-head { position: relative; display: flex; align-items: center; gap: 9px; }
@@ -689,17 +685,6 @@
       </div>
     </div>
 
-    <!-- Высота -->
-    <div class="card accented metric-card m-alt">
-      <div class="m-head"><span class="m-icon">⛰️</span><span class="m-title">Altitude</span></div>
-      <div class="m-value"><span id="ma-val">—</span><span class="m-unit">m</span></div>
-      <div class="m-desc">Estimated from pressure relative to sea level</div>
-      <div class="spark-wrap">
-        <div class="spark-label"><span>Trend</span><span class="spark-range" id="spark-alt-range"></span></div>
-        <div id="spark-alt-box"><div class="spark-empty">collecting…</div></div>
-      </div>
-    </div>
-
     <!-- Прогноз / барический тренд -->
     <div class="card accented metric-card m-fc">
       <div class="m-head"><span class="m-icon">📈</span><span class="m-title">Pressure trend</span></div>
@@ -1025,7 +1010,7 @@
   const STATS_SAVE_MS = 5000;   // запись синхронная, чаще раза в 5 с ни к чему
 
   function newStat()  { return { min: null, max: null, sum: 0, n: 0 }; }
-  function newStats() { return { temp: newStat(), press: newStat(), alt: newStat(),
+  function newStats() { return { temp: newStat(), press: newStat(),
                                  trend: newStat(), chip: newStat() }; }
 
   let stats       = newStats();
@@ -1150,7 +1135,7 @@
   const SPARK_DRAW_MAX  = 120;     // точек на отрисовку (см. thin)
   const SPARK_REDRAW_MS = 5000;    // чаще перерисовывать нечего: точка раз в минуту
 
-  function newSeries() { return { temp: [], press: [], alt: [], trend: [] }; }
+  function newSeries() { return { temp: [], press: [], trend: [] }; }
   let series = newSeries();
 
   // Точка ряда: { t: метка времени, v: значение | null (датчик молчал) }
@@ -1184,7 +1169,7 @@
   function seedHistory(j) {
     if (!j || !j.n || !Array.isArray(j.age)) return 0;
     const now  = Date.now();
-    const cols = { temp: j.temp, press: j.press, alt: j.alt, trend: j.trend };
+    const cols = { temp: j.temp, press: j.press, trend: j.trend };
     const next = newSeries();
     let span = 0;
     Object.keys(next).forEach(function(k) {
@@ -1334,7 +1319,6 @@
     const sl = cssVar('--s-line');
     drawSpark('spark-temp-box',  series.temp,  sl, 0.5);
     drawSpark('spark-press-box', series.press, sl, 1.0);
-    drawSpark('spark-alt-box',   series.alt,   sl, 5.0);
     drawSpark('spark-fc-box',    series.trend, sl, 0.4);
   }
 
@@ -1623,13 +1607,11 @@
     if (d.bmp_valid) {
       pushStat(stats.temp,  d.bmp_temp);
       pushStat(stats.press, d.pressure);
-      pushStat(stats.alt,   d.altitude);
       pushStat(stats.trend, d.trend);
 
       const now = Date.now();
       pushPoint(series.temp,  d.bmp_temp, now);
       pushPoint(series.press, d.pressure, now);
-      pushPoint(series.alt,   d.altitude, now);
       pushPoint(series.trend, d.trend,    now);
     }
     const chip = parseFloat(d.temp);
@@ -1642,7 +1624,6 @@
       uptime: d.uptime,
       bmp_temp: d.bmp_valid ? +d.bmp_temp.toFixed(2) : null,
       pressure: d.bmp_valid ? +d.pressure.toFixed(2) : null,
-      altitude: d.bmp_valid ? +d.altitude.toFixed(1) : null,
       trend:    d.bmp_valid ? +d.trend.toFixed(2)    : null,
       chip_temp: isNaN(chip) ? null : chip,
       rssi: d.rssi,
@@ -1750,8 +1731,6 @@
       const pl = pressureLevel(d.pressure);
       setPill('mp-pill', 'mp-pill-txt', pl[0] + ' · ' + d.pressure_mmhg.toFixed(0) + ' mmHg', pl[1]);
 
-      document.getElementById('ma-val').textContent = d.altitude.toFixed(0);
-
       document.getElementById('mf-val').textContent = (d.trend >= 0 ? '+' : '') + d.trend.toFixed(2);
       const fc = FORECAST[d.forecast] || FORECAST[0];
       setPill('mf-pill', 'mf-pill-txt', fc[0] + '  ' + fc[1], fc[2]);
@@ -1762,7 +1741,7 @@
 
       drawSparks(false);
     } else {
-      ['mt-val','mt-min','mt-avg','mt-max','mp-val','mp-min','mp-avg','mp-max','ma-val','mf-val']
+      ['mt-val','mt-min','mt-avg','mt-max','mp-val','mp-min','mp-avg','mp-max','mf-val']
         .forEach(id => { document.getElementById(id).textContent = '—'; });
       setPill('mt-pill', 'mt-pill-txt', 'No sensor', 'crit');
       setPill('mp-pill', 'mp-pill-txt', 'No sensor', 'crit');
@@ -1900,7 +1879,7 @@
 
   function exportCsv() {
     if (!samples.length) { showToast('No samples collected yet'); return; }
-    const cols = ['time','uptime','bmp_temp','pressure','altitude','trend','chip_temp','rssi','ram_free','bat_pct','bat_v'];
+    const cols = ['time','uptime','bmp_temp','pressure','trend','chip_temp','rssi','ram_free','bat_pct','bat_v'];
     const rows = [cols.join(',')];
     samples.forEach(function(s) {
       rows.push(cols.map(function(c) { return s[c] === null || s[c] === undefined ? '' : s[c]; }).join(','));
@@ -1918,7 +1897,6 @@
       stats: {
         temp:  { min: stats.temp.min,  avg: avg(stats.temp),  max: stats.temp.max,  unit: 'C' },
         press: { min: stats.press.min, avg: avg(stats.press), max: stats.press.max, unit: 'hPa' },
-        alt:   { min: stats.alt.min,   avg: avg(stats.alt),   max: stats.alt.max,   unit: 'm' },
         trend: { min: stats.trend.min, avg: avg(stats.trend), max: stats.trend.max, unit: 'hPa/h' },
         chip:  { min: stats.chip.min,  avg: avg(stats.chip),  max: stats.chip.max,  unit: 'C' }
       },

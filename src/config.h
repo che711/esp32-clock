@@ -32,7 +32,16 @@
 #define BMP280_SDA_PIN  4
 #define BMP280_SCL_PIN  5
 #define BMP280_I2C_ADDR 0x76        // 0x76: SDO→GND | 0x77: SDO→VCC
-#define SEA_LEVEL_HPA   1013.25f    // для расчёта высоты
+//   Высота места установки над уровнем моря. Часы не ездят, поэтому это
+//   константа — и именно из неё считается QNH. Раньше было наоборот: высоту
+//   выводили из давления по стандартной атмосфере (SEA_LEVEL_HPA = 1013.25),
+//   и получалась не высота, а погода в метрах: график прыгал на ±8 м на
+//   каждый гПа. Хуже того, QNH считался от этой же высоты и потому всегда
+//   давал 1013 ± 2 гПа — приведение к морю отменяло ровно то, из чего высоту
+//   и получили, и число не значило ничего.
+//   Варшава: 100–118 м, зависит от района. Свой адрес стоит уточнить по
+//   карте — ошибка в 10 м уводит QNH примерно на 1.2 гПа.
+#define HOME_ALTITUDE_M 110.0f
 
 // ── Батарея 18650 ────────────────────────────────────────────
 //   BAT+ ──[100к]──●──[100к]── GND, точка ● → GPIO2 (ADC1).
@@ -151,7 +160,7 @@
 #define MQTT_TOPIC_STATE    "clock/weather/state"
 #define MQTT_TOPIC_TEMP     "clock/weather/temperature"
 #define MQTT_TOPIC_PRESSURE "clock/weather/pressure"
-#define MQTT_TOPIC_ALTITUDE "clock/weather/altitude"
+#define MQTT_TOPIC_QNH      "clock/weather/qnh"
 #define MQTT_TOPIC_BATTERY  "clock/weather/battery"
 #define MQTT_TOPIC_BAT_V    "clock/weather/battery_voltage"
 #define MQTT_TOPIC_STATUS   "clock/weather/status"

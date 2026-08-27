@@ -34,8 +34,11 @@ String localIP    = "";
 // Копить её из broadcast-кадров нельзя: те уходят раз в секунду и минуту
 // подряд несут одно и то же число, из чего график получался ступенчатым.
 static void historyPush(uint32_t nowMs) {
+    // 5-й аргумент — бывшая высота. Она теперь константа (HOME_ALTITUDE_M),
+    // дашборд её не рисует и /api/history не отдаёт; колонка в TrendSample
+    // осталась только потому, что её выпиливание тянет правку теста.
     trendHistory.push(nowMs, weather.valid, weather.temperature,
-                      weather.pressure, weather.altitude, weather.pressureTrend);
+                      weather.pressure, HOME_ALTITUDE_M, weather.pressureTrend);
 }
 
 static uint32_t lastSensorMs  = 0;
