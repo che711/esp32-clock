@@ -614,6 +614,38 @@ void test_drive_registers_in_range() {
     }
 }
 
+// ─── Мигание знака разряда ───────────────────────────────
+// Выше порога знак горит ровно: мигание — это отдельная ступень тревоги,
+// и начинаться она должна на своём проценте, а не на пороге самого знака
+void test_batt_warn_steady_above_blink_threshold() {
+    TEST_ASSERT_TRUE(battWarnVisible(20, 0, 15));
+    TEST_ASSERT_TRUE(battWarnVisible(20, 1, 15));
+    TEST_ASSERT_TRUE(battWarnVisible(16, 1, 15));
+}
+
+// На пороге и ниже — секунда через секунду, фаза по парности секунды кадра
+void test_batt_warn_blinks_at_and_below_threshold() {
+    TEST_ASSERT_TRUE(battWarnVisible(15, 100, 15));
+    TEST_ASSERT_FALSE(battWarnVisible(15, 101, 15));
+    TEST_ASSERT_TRUE(battWarnVisible(0, 102, 15));
+    TEST_ASSERT_FALSE(battWarnVisible(0, 103, 15));
+}
+
+// Скважность ровно половина: «секунда на секунду» — это не «мелькнул и погас»
+void test_batt_warn_blink_duty_is_half() {
+    int on = 0;
+    for (uint32_t s = 0; s < 60; s++) if (battWarnVisible(10, s, 15)) on++;
+    TEST_ASSERT_EQUAL_INT(30, on);
+}
+
+// Соседние секунды всегда в разных фазах: знак не должен застревать
+// зажжённым или погашенным на два кадра подряд
+void test_batt_warn_blink_alternates_every_second() {
+    for (uint32_t s = 0; s < 1000; s++)
+        TEST_ASSERT_NOT_EQUAL(battWarnVisible(5, s, 15),
+                              battWarnVisible(5, s + 1, 15));
+}
+
 // ─── Энергосбережение: профили и расписание ──────────────
 void test_power_profile_names() {
     TEST_ASSERT_EQUAL_STRING("normal", powerProfile(POWER_NORMAL).name);
@@ -1180,6 +1212,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_drive_is_monotonic);
     RUN_TEST(test_drive_midpoint_is_gamma_corrected);
     RUN_TEST(test_drive_registers_in_range);
+
+    RUN_TEST(test_batt_warn_steady_above_blink_threshold);
+    RUN_TEST(test_batt_warn_blinks_at_and_below_threshold);
+    RUN_TEST(test_batt_warn_blink_duty_is_half);
+    RUN_TEST(test_batt_warn_blink_alternates_every_second);
 
     RUN_TEST(test_power_profile_names);
     RUN_TEST(test_power_profile_tightens_with_level);

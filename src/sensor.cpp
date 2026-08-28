@@ -52,7 +52,6 @@ SensorData sensorRead() {
 
     float t = bmp.readTemperature();
     float p = bmp.readPressure() / 100.0f;
-    float a = bmp.readAltitude(SEA_LEVEL_HPA);
 
     if (!weatherPlausible(t, p)) {
         data.valid = false;
@@ -62,12 +61,11 @@ SensorData sensorRead() {
 
     data.temperature = t;
     data.pressure    = p;
-    data.altitude    = a;
     data.valid       = true;
 
     // ── Производные (формулы — в weather_calc.h) ─────────────
     data.pressureMmHg = pressureToMmHg(p);
-    data.pressureQnh  = pressureToQnh(p, t, a);
+    data.pressureQnh  = pressureToQnh(p, t, HOME_ALTITUDE_M);
     data.airDensity   = airDensityOf(p, t);
 
     history.maybePush(p, millis(), PRESSURE_HISTORY_INTERVAL_MS);

@@ -53,6 +53,8 @@ static void publishDiscovery() {
                         MQTT_TOPIC_TEMP);
     publishDiscoveryOne("pressure", "Давление", "pressure", "hPa",
                         MQTT_TOPIC_PRESSURE);
+    publishDiscoveryOne("qnh", "Давление (QNH)", "pressure", "hPa",
+                        MQTT_TOPIC_QNH);
 #if BATTERY_ENABLED
     publishDiscoveryOne("battery", "Батарея", "battery", "%",
                         MQTT_TOPIC_BATTERY);
@@ -106,8 +108,11 @@ static void publishData(const SensorData& d, const BatteryData& bat) {
     snprintf(buf, sizeof(buf), "%.2f", d.pressure);
     mqttClient.publish(MQTT_TOPIC_PRESSURE, buf, false);
 
-    snprintf(buf, sizeof(buf), "%.1f", d.altitude);
-    mqttClient.publish(MQTT_TOPIC_ALTITUDE, buf, false);
+    // Публикуем QNH, а не высоту: высота — константа из config.h, слать её
+    // каждый цикл незачем, а приведённое к морю давление как раз меняется
+    // и сходится с METAR ближайшего аэропорта.
+    snprintf(buf, sizeof(buf), "%.2f", d.pressureQnh);
+    mqttClient.publish(MQTT_TOPIC_QNH, buf, false);
 
 #if BATTERY_ENABLED
     if (bat.valid) {
@@ -121,19 +126,19 @@ static void publishData(const SensorData& d, const BatteryData& bat) {
     // JSON payload в один топик (удобно для Node-RED / InfluxDB)
     if (bat.valid) {
         snprintf(buf, sizeof(buf),
-                 "{\"temperature\":%.2f,\"pressure\":%.2f,\"altitude\":%.1f,"
+                 "{\"temperature\":%.2f,\"pressure\":%.2f,\"qnh\":%.2f,"
                  "\"battery\":%u,\"battery_v\":%.2f}",
-                 d.temperature, d.pressure, d.altitude,
+                 d.temperature, d.pressure, d.pressureQnh,
                  bat.percent, bat.voltage);
     } else {
         snprintf(buf, sizeof(buf),
-                 "{\"temperature\":%.2f,\"pressure\":%.2f,\"altitude\":%.1f}",
-                 d.temperature, d.pressure, d.altitude);
+                 "{\"temperature\":%.2f,\"pressure\":%.2f,\"qnh\":%.2f}",
+                 d.temperature, d.pressure, d.pressureQnh);
     }
     mqttClient.publish(MQTT_TOPIC_STATE, buf, false);
 
-    Serial.printf("[MQTT] Опубликовано: T=%.2f°C P=%.2fгПа A=%.1fм\n",
-                  d.temperature, d.pressure, d.altitude);
+    Serial.printf("[MQTT] Опубликовано: T=%.2f°C P=%.2fгПа QNH=%.2fгПа\n",
+                  d.temperature, d.pressure, d.pressureQnh);
 }
 
 // ── Публичный API ─────────────────────────────────────────────

@@ -108,7 +108,6 @@ static void buildJson(char* buf, size_t sz) {
         "\"bmp_temp\":%.2f,"
         "\"pressure\":%.2f,"
         "\"pressure_mmhg\":%.1f,"
-        "\"altitude\":%.1f,"
         "\"trend\":%.2f,"
         "\"forecast\":%d,"
         "\"bat_valid\":%s,"
@@ -148,7 +147,6 @@ static void buildJson(char* buf, size_t sz) {
         weather.temperature,
         weather.pressure,
         weather.pressureMmHg,
-        weather.altitude,
         weather.pressureTrend,
         (int)weather.forecastIcon,
         battery.valid ? "true" : "false",
@@ -235,12 +233,12 @@ static void handleApiWeather() {
     char json[320];
     snprintf(json, sizeof(json),
         "{\"valid\":%s,\"temperature\":%.2f,\"pressure\":%.2f,"
-        "\"pressure_mmhg\":%.1f,\"altitude\":%.1f,\"qnh\":%.2f,"
+        "\"pressure_mmhg\":%.1f,\"qnh\":%.2f,"
         "\"air_density\":%.4f,\"trend\":%.2f,\"forecast\":%d,"
         "\"battery_valid\":%s,\"battery_pct\":%d,\"battery_v\":%.2f}",
         weather.valid ? "true" : "false",
         weather.temperature, weather.pressure, weather.pressureMmHg,
-        weather.altitude, weather.pressureQnh, weather.airDensity,
+        weather.pressureQnh, weather.airDensity,
         weather.pressureTrend, (int)weather.forecastIcon,
         battery.valid ? "true" : "false",
         (int)battery.percent, battery.voltage);
@@ -322,7 +320,6 @@ static void handleApiHistory() {
 
     writeSeries(out, "temp",  "%.2f", &TrendSample::temp);
     writeSeries(out, "press", "%.2f", &TrendSample::press);
-    writeSeries(out, "alt",   "%.1f", &TrendSample::alt);
     writeSeries(out, "trend", "%.2f", &TrendSample::trend);
 
     out.put("}");
