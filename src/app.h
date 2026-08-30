@@ -43,5 +43,8 @@ void swPause();
 void swReset();
 
 void applyAutoBrightness();      // уровень по текущему часу, если режим авто
-void screenSetPower(bool on);    // питание экрана из UI; ночью — на POWER_SCREEN_PEEK_MS
+// Питание экрана из UI; ночью — на POWER_SCREEN_PEEK_MS. Возвращает причину
+// отказа ("battery" | "brightness") или nullptr, если команда выполнена:
+// у двух отказов противоположные советы пользователю, и различать их надо.
+const char* screenSetPower(bool on);
 uint32_t screenPeekLeftS();      // секунд до авто-гашения ночью, 0 — не горит по подсветке

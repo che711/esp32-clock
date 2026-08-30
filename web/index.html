@@ -932,8 +932,17 @@
 <div class="toast" id="toast"></div>
 
 <script>
+  // ── localStorage: обёртки ────────────────────────────
+  // Сам геттер localStorage бросает SecurityError, когда браузеру запрещены
+  // site data («блокировать всё» в настройках). Ниже по файлу это учтено
+  // везде, но три обращения — тема и единицы — стояли голыми, и одно из них
+  // было ПЕРВЫМ оператором скрипта: исключение там обрывало разбор целиком,
+  // и страница оставалась мёртвой — без сокета, без отрисовки, без причины.
+  function lsGet(k)    { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); }    catch (e) {} }
+
   // ── Тема ─────────────────────────────────────────────
-  applyTheme(localStorage.getItem('theme') || 'dark');
+  applyTheme(lsGet('theme') || 'dark');
   function applyTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
     document.getElementById('theme-btn').textContent = t === 'dark' ? '🌙' : '☀️';
@@ -941,7 +950,7 @@
   function toggleTheme() {
     const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     applyTheme(next);
-    localStorage.setItem('theme', next);
+    lsSet('theme', next);
     // Спарклайн — готовый SVG с зашитым в него цветом линии, CSS его уже не
     // достанет. Без перерисовки линия оставалась бы в цвете прошлой темы до
     // следующего снимка, то есть до секунды.
@@ -970,7 +979,7 @@
   let lastScreenPeek    = 0;      // секунд до авто-гашения ночью, 0 — не горит по подсветке
   let isDragging        = false;
   let modeChangePending = false;
-  let isFahrenheit      = localStorage.getItem('unit') === 'f';
+  let isFahrenheit      = lsGet('unit') === 'f';
   let lastD             = null;   // последний payload — для перерисовки при смене единиц
   let deviceTime        = '--:--:--';
 
@@ -995,6 +1004,13 @@
   }
   function tempVal(c) { return isFahrenheit ? c * 9 / 5 + 32 : c; }
   function tempTxt(c) { return (c === null || c === undefined) ? '—' : tempVal(c).toFixed(1); }
+  // То же для величин без пересчёта единиц. Счётчики min/avg/max возвращают
+  // null, пока не набрано ни одного отсчёта, и .toFixed() на нём — TypeError,
+  // а он тут стоит дорого: исключение из render() глотает обработчик кадра,
+  // и дашборд просто замирает без единого следа в журнале.
+  function numTxt(v, digits) {
+    return (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(digits);
+  }
   applyUnitUI();
 
   // ── Статистика: min / avg / max + история для графиков ──
@@ -1470,10 +1486,17 @@
     .then(r => r.json())
     .then(j => {
       // Ответ несёт фактическое состояние панели, и оно может не совпасть с
-      // просьбой: ниже POWER_SCREEN_OFF_PCT включение получает отказ. Без
-      // строки в журнале это выглядело бы как незалипшая кнопка.
-      if (j.ok && j.display_on !== want)
-        logEvent('warn', 'Display stayed off — battery too low to light it');
+      // просьбой. Без строки в журнале это выглядело бы как незалипшая кнопка.
+      //
+      // Причин отказа две, и советы у них противоположные: заряд лечится
+      // зарядкой, нулевая яркость — ползунком. Поэтому прошивка присылает
+      // refused, а не просто расхождение: раньше текст был один, «батарея»,
+      // и на нулевом ползунке он врал.
+      if (j.ok && j.display_on !== want) {
+        logEvent('warn', j.refused === 'brightness'
+          ? 'Display stayed off — brightness is at 0 %, raise the slider'
+          : 'Display stayed off — battery too low to light it');
+      }
     })
     .catch(() => logEvent('error', 'Power request failed'))
     .finally(() => { btn.disabled = false; });
@@ -1545,7 +1568,7 @@
   }
 
   // ── WebSocket ────────────────────────────────────────
-  let ws, wsReconnectTimer, sawFirstFrame = false;
+  let ws, wsReconnectTimer, sawFirstFrame = false, frameErrLogged = false;
   function wsConnect() {
     swServerSynced = false;   // при новом коннекте заново берём состояние секундомера
     setWsStatus(false);       // пока не подключились — кнопки заблокированы
@@ -1559,11 +1582,23 @@
     };
     ws.onmessage = (e) => {
       if (typeof e.data === 'string' && e.data.startsWith('pong:')) { swOnPong(e.data); return; }
+      // Кадр роняет либо битый JSON, либо ошибка в ingest/render. Раньше здесь
+      // стоял пустой catch, и оба случая выглядели одинаково: связь «Live»,
+      // кадры идут, цифры не меняются — и ни строчки нигде. Пишем в журнал,
+      // но ровно один раз: ошибка обычно стабильная, а кадр приходит раз
+      // в секунду, и без этого журнал забился бы одной и той же строкой.
+      // Флаг снимает следующий успешный кадр — значит, чинилось само.
       try {
         const d = JSON.parse(e.data);
         if (!sawFirstFrame) { sawFirstFrame = true; logEvent('info', 'Telemetry stream started'); }
         ingest(d); render(d);
-      } catch(_) {}
+        frameErrLogged = false;
+      } catch (err) {
+        if (!frameErrLogged) {
+          frameErrLogged = true;
+          logEvent('error', 'Frame dropped — ' + ((err && err.message) || err));
+        }
+      }
     };
     ws.onclose   = () => {
       setWsStatus(false);
@@ -1725,9 +1760,9 @@
       setPill('mt-pill', 'mt-pill-txt', cf[0], cf[1]);
 
       document.getElementById('mp-val').textContent = d.pressure.toFixed(1);
-      document.getElementById('mp-min').textContent = stats.press.min.toFixed(1);
-      document.getElementById('mp-avg').textContent = avg(stats.press).toFixed(1);
-      document.getElementById('mp-max').textContent = stats.press.max.toFixed(1);
+      document.getElementById('mp-min').textContent = numTxt(stats.press.min, 1);
+      document.getElementById('mp-avg').textContent = numTxt(avg(stats.press), 1);
+      document.getElementById('mp-max').textContent = numTxt(stats.press.max, 1);
       const pl = pressureLevel(d.pressure);
       setPill('mp-pill', 'mp-pill-txt', pl[0] + ' · ' + d.pressure_mmhg.toFixed(0) + ' mmHg', pl[1]);
 
