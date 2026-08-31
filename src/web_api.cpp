@@ -192,7 +192,7 @@ static void handleRoot() {
     // no-cache здесь не значит «не кешируй»: копию держать можно, но перед
     // показом обязательно спросить. Спрашивает браузер через ETag, а тот
     // считается из содержимого страницы при сборке (gen_web_ui.py). Совпал —
-    // отвечаем 304 и не гоняем 26 КБ; не совпал — страница поменялась, и
+    // отвечаем 304 и не гоняем 30 КБ; не совпал — страница поменялась, и
     // отдать надо новую.
     server.sendHeader("Cache-Control", "no-cache");
     server.sendHeader("ETag", INDEX_HTML_ETAG);
@@ -203,7 +203,7 @@ static void handleRoot() {
     }
 
     // Страница лежит во флеше уже сжатой — распаковывает её браузер.
-    // 75 КБ → 17 КБ и по сети, и во флеше.
+    // 114 КБ → 30 КБ и по сети, и во флеше.
     server.sendHeader("Content-Encoding", "gzip");
     server.send_P(200, "text/html", (PGM_P)INDEX_HTML_GZ, INDEX_HTML_GZ_LEN);
 }
@@ -355,13 +355,17 @@ static void handleApiPower() {
     if (!originAccepted()) return sendForeignOrigin();
     if (server.hasArg("on")) {
         bool on = argIsTrue(server.arg("on"));
-        screenSetPower(on);      // не displaySetPower: ночью включаем с таймером
+        // не displaySetPower: ночью включаем с таймером
+        const char* refused = screenSetPower(on);
         // Отдаём фактическое состояние панели, а не запрошенное: включение
-        // могут и не выполнить (заряд на исходе), и ответ обязан это показать.
-        char resp[48];
+        // могут и не выполнить, и ответ обязан это показать. Вместе с причиной:
+        // «заряд на исходе» и «яркость в нуле» лечатся по-разному, и дашборду
+        // надо знать, что советовать. Пустая строка — отказа не было.
+        char resp[96];
         snprintf(resp, sizeof(resp),
-                 "{\"ok\":true,\"display_on\":%s}",
-                 displayIsOn() ? "true" : "false");
+                 "{\"ok\":true,\"display_on\":%s,\"refused\":\"%s\"}",
+                 displayIsOn() ? "true" : "false",
+                 refused ? refused : "");
         server.send(200, "application/json", resp);
         webApiBroadcast();
         return;
