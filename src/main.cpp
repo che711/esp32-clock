@@ -364,6 +364,18 @@ static uint32_t wifiDotMs        = 0;   // ритм точек в логе, ра
 // mDNS, ни настроек радио под профиль — то есть clock.local молчал бы до ребута.
 static bool     wifiReady        = false;
 
+// Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
+// чтобы ретрай отсчитывался от старта, а не от первого захода в цикл.
+static uint32_t lastNtpMs = 0;
+
+// Поднимает SNTP-демона и задаёт TZ-правило (DST считается автоматически).
+// Вызывается и без связи: TZ должен быть установлен в любом случае, а демон
+// сам ретраит запрос, когда сеть появится.
+static void startNTP() {
+    configTzTime(TZ_INFO, NTP_SERVER);
+    lastNtpMs = millis();
+}
+
 static void wifiOnConnected() {
     wifiReady = true;
     localIP = WiFi.localIP().toString();
@@ -380,6 +392,12 @@ static void wifiOnConnected() {
         MDNS.addService("http", "tcp", 80);
         Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
     }
+    // Время — сразу, как появилась связь. SNTP запущен ещё в setup(), но без
+    // сети его запрос ушёл в никуда, а повтора ждать долго: наш в
+    // maintainNetwork() случится только через NTP_RETRY_MS, и всё это время на
+    // экране прочерки. Пока setup() ждал связь, вызов был не нужен: SNTP
+    // стартовал уже после подключения. На реконнекте запрос лишний — один пакет.
+    startNTP();
 }
 
 static void wifiBeginConnect() {
@@ -411,37 +429,6 @@ static bool wifiConnectStep(uint32_t now) {
         return true;
     }
     return false;
-}
-
-// Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
-// чтобы ретрай отсчитывался от старта, а не от первого захода в цикл.
-static uint32_t lastNtpMs = 0;
-
-// Поднимает SNTP-демона и задаёт TZ-правило (DST считается автоматически).
-// Вызывается и без связи: TZ должен быть установлен в любом случае, а демон
-// сам ретраит запрос, когда сеть появится.
-static void startNTP() {
-    configTzTime(TZ_INFO, NTP_SERVER);
-    lastNtpMs = millis();
-}
-
-static void syncNTP() {
-    startNTP();
-    // Без связи ждать нечего — уйдём в loop(), ретрай сделает maintainNetwork().
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("NTP: no WiFi, retry in background");
-        return;
-    }
-    Serial.print("NTP sync");
-    struct tm t;
-    uint8_t tries = 0;
-    // getLocalTime с малым таймаутом на итерацию, чтобы не блокировать по 5 с.
-    while (!getLocalTime(&t, 500) && tries < 20) {
-        Serial.print("."); tries++;
-    }
-    // Ждём только ради первого кадра: не дождались — не беда, экран покажет
-    // прочерки, а демон и ретрай в maintainNetwork() доведут дело до конца.
-    Serial.println(tries < 20 ? " OK" : " TIMEOUT, retry in background");
 }
 
 // Поддержание сети: реконнект + периодический ре-синк NTP
@@ -636,6 +623,13 @@ bool resetWasAbnormal() {
     }
 }
 
+// Экран на старте поднимается в одном из двух мест setup(): сразу или после
+// проверки заряда. Функция одна, чтобы эти места не разъехались.
+static void bootSplash() {
+    displayBegin();
+    displaySplash("Starting...");
+}
+
 // ─────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
@@ -644,13 +638,25 @@ void setup() {
     // когда порт открыт, но никто не вычитывает.
     Serial.setTxTimeoutMs(0);
 #endif
+
+    // Отклик на RST — до всякого ожидания. Раньше синий и заставка шли после
+    // паузы под USB ниже, а экран до своей инициализации не трогался: полторы
+    // секунды после нажатия на плате не менялось ничего, будто кнопка не
+    // сработала.
+    //
+    // Пробуждение по таймеру — не старт, а проверка заряда: экран на этом пути
+    // поднимается, только если решим вставать (см. ниже). Синий — на обоих
+    // путях, как и было.
+    const bool chargeCheck = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+    ledColor(0, 0, 5);   // dim синий на старте
+    if (!chargeCheck) bootSplash();
+
     delay(1500);   // ждём поднятия USB CDC на хосте, иначе стартовый лог теряется
 
     Serial.println("\n=== ESP32-C6 Clock + Weather boot ===");
     bootReason = esp_reset_reason();
     Serial.printf("Reset reason: %s%s\n", resetReasonName(),
                   resetWasAbnormal() ? "  <-- аварийный" : "");
-    ledColor(0, 0, 5);   // dim синий на старте
 
     // 80 МГц вместо 160: для часов + веб-сервера хватает с запасом,
     // а нагрев кристалла и потребление заметно ниже. 80 — минимум для WiFi.
@@ -667,9 +673,10 @@ void setup() {
     // Проснулись по таймеру — значит уснули на пустой банке. Решаем прямо
     // здесь, пока не подняты ни экран, ни радио: если заряд не подрос, полный
     // старт был бы дороже всего, что мы за него получим.
-    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER &&
-        !powerShouldWake(battery.percent, battery.valid, POWER_WAKE_PCT)) {
-        deepSleepNow("заряд всё ещё на нуле");
+    if (chargeCheck) {
+        if (!powerShouldWake(battery.percent, battery.valid, POWER_WAKE_PCT))
+            deepSleepNow("заряд всё ещё на нуле");
+        bootSplash();                // встаём — экран на этом пути ещё не поднимали
     }
 
     // Время сон переживает: RTC идёт и в нём. Если часы показывают
@@ -684,28 +691,32 @@ void setup() {
     weather = sensorRead();
     historyPush(millis());
 
-    displayBegin();
-    displaySplash("Connecting WiFi...");
-
-    // В setup() ждём связь на месте: показывать всё равно нечего — на экране
-    // заставка, — а syncNTP() ниже без сети бессмысленна. Автомат тот же, что
-    // крутится в loop(), просто здесь его прокачиваем сами.
+    // Связь и время в setup() не ждём — их доводит loop(): подключение крутит
+    // автомат в maintainNetwork(), время запрашивает wifiOnConnected().
+    //
+    // Раньше связь здесь прокачивалась на месте, а следом ещё до десяти секунд
+    // ждали NTP: «показывать всё равно нечего, на экране заставка». Показывать
+    // было нечего, но и отвечать тоже: веб-сервер поднимался только после обоих
+    // ожиданий, и в худшем случае часы выходили на связь через 15 с WiFi плюс
+    // 10 с NTP. Сильнее всего это било по кнопке RST: она стирает время в RTC,
+    // и ожидание NTP после неё шло всегда, а после паники проскакивало.
+    //
+    // wifiBeginConnect() первым: WiFi.mode() внутри поднимает сетевой стек,
+    // на котором стоят и SNTP, и оба сервера.
     wifiBeginConnect();
-    while (!wifiConnectStep(millis())) delay(50);
-    syncNTP();
-    powerBegin();          // профиль применяем, когда экран и радио уже есть
-
+    startNTP();            // TZ нужен сразу: время могло пережить сброс в RTC
+    powerBegin();          // радио профиль получит в wifiOnConnected()
     webApiBegin();
 
 #if MQTT_ENABLED
     mqttInit();
 #endif
 
-    // Синий значит «стартуем и подключаемся» — на этом и то, и другое
-    // закончилось. Раньше его никто не снимал, и гас он только на первом
-    // опросе датчика: в обычном режиме через минуту, в экономе через две.
-    // То есть индикатор держался уже после того, как WiFi поднят, IP получен
-    // и дашборд отвечает, — сообщая не о том событии, о котором заявлено.
+    // Синий значит «стартуем», и старт на этом закончен. Подключение к WiFi
+    // дальше идёт в loop(), но держать синий до него не выйдет: стартовый
+    // уровень — эконом, индикация в нём молчит, и updateWeather() погасил бы
+    // синий первым же оборотом. Раньше его не снимал никто, и гас он только
+    // на первом опросе датчика — через минуту-две, когда дашборд давно отвечал.
     ledColor(0, 0, 0);
 }
 
