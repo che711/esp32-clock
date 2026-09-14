@@ -273,14 +273,20 @@
   .host-chip { font-family: var(--font-mono); font-size: 11px;
                color: var(--accent); background: var(--accent-soft);
                border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  /* Адрес и кнопка темы — одна группа: если шапка переносится
+     на вторую строку, кнопка не отрывается от адреса. */
+  .header-side { display: flex; align-items: center; gap: 10px; }
 
+  /* Кнопка стоит в шапке, а не висит в углу экрана. Была
+     position: fixed: на телефоне колонка занимает всю ширину,
+     и кнопка ложилась поверх адреса, а при прокрутке — поверх
+     карточек. Цена — при прокрутке она уезжает вместе с шапкой. */
   .theme-btn {
-    position: fixed; top: 14px; right: 14px;
     width: 40px; height: 40px; border-radius: 50%;
     background: var(--surface); border: 1px solid var(--line);
     color: var(--accent); font-size: 16px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    z-index: 50; box-shadow: var(--shadow);
+    box-shadow: var(--shadow);
     transition: transform 0.25s, border-color 0.2s;
   }
   .theme-btn:hover { border-color: var(--accent); transform: rotate(-16deg) scale(1.05); }
@@ -624,13 +630,14 @@
 </head>
 <body>
 
-<button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
-
 <div class="wrap">
 
   <div class="app-header">
     <div class="app-title">ESP32 <b>CLOCK</b></div>
-    <div class="host-chip" id="host-chip">clock.local</div>
+    <div class="header-side">
+      <div class="host-chip" id="host-chip">clock.local</div>
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    </div>
   </div>
 
   <!-- ── Часы ── -->
