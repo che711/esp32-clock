@@ -654,12 +654,26 @@ void setup() {
     // в полторы секунды при 60–80 мА, а с неответившим датчиком — в две с
     // лишним. Это около 0.4 мА среднего тока: на порядок больше самого сна,
     // ради которого всё и затевалось.
-    const bool chargeCheck = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+    //
+    // Тот же вопрос задаётся после сброса по питанию — brownout или глитч.
+    // Раньше такой сброс шёл сразу в обычный старт: заставка на OLED, полторы
+    // секунды ожидания и подъём Wi-Fi — самый крупный бросок тока за всю работу.
+    // Банка, просевшая до сброса на пике передачи, на нём же проседала снова,
+    // и часы грузились по кругу. До нуля в checkBatteryEmpty() дело при этом не
+    // доходило: медиана и сглаживание прячут короткие провалы, и шкала на таком
+    // сбросе ещё выше нуля, — так что банка разряжалась ниже нуля шкалы, ровно
+    // туда, куда сон её не пускает. Порог тот же, что у пробуждения: сброс снял
+    // нагрузку, банка отскочила, и вставать стоит, только если заряд с запасом.
+    const esp_reset_reason_t rst = esp_reset_reason();
+    const bool timerWake   = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+    const bool powerReset  = rst == ESP_RST_BROWNOUT || rst == ESP_RST_PWR_GLITCH;
+    const bool chargeCheck = timerWake || powerReset;
     if (chargeCheck) {
         batteryInit();
         battery = batteryRead();
         if (!powerShouldWake(battery.percent, battery.valid, POWER_WAKE_PCT))
-            deepSleepNow("заряд всё ещё на нуле");
+            deepSleepNow(timerWake ? "заряд всё ещё на нуле"
+                                   : "сброс по питанию на разряженной банке");
     }
 
     // Отклик на RST — до всякого ожидания. Раньше синий и заставка шли после

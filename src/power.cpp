@@ -107,9 +107,20 @@ void powerSetMode(PowerMode m) {
 uint32_t powerSensorIntervalMs() { return powerProfile(mode).sensorMs; }
 bool     powerLedEnabled()       { return powerProfile(mode).led; }
 
+// Порог возврата не выше порога гашения превратил бы гистерезис в генератор:
+// ответ переворачивался бы на каждом вызове (см. powerScreenBatteryNext).
+static_assert(POWER_SCREEN_ON_PCT > POWER_SCREEN_OFF_PCT,
+              "POWER_SCREEN_ON_PCT обязан быть выше POWER_SCREEN_OFF_PCT");
+
 bool powerScreenBatteryOkNow() {
-    return powerScreenBatteryOk(battery.percent, battery.valid,
-                                POWER_SCREEN_OFF_PCT);
+    // Состояние рубежа живёт здесь, а не у вызывающих: спрашивают двое —
+    // расписание раз в секунду и команда включения, — и ответ у них обязан
+    // быть один. Стартуем с «можно»: иначе часы, вставшие из сна на
+    // POWER_WAKE_PCT, держали бы панель тёмной до POWER_SCREEN_ON_PCT.
+    static bool ok = true;
+    ok = powerScreenBatteryNext(ok, battery.percent, battery.valid,
+                                POWER_SCREEN_OFF_PCT, POWER_SCREEN_ON_PCT);
+    return ok;
 }
 
 bool powerScreenScheduleAllowsNow(int hour) {
