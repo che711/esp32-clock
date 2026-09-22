@@ -495,6 +495,9 @@ void webApiBegin() {
     // Счётчик обязательных заголовков 0: без Origin (не браузер) пускаем,
     // с чужим Origin — отказ в рукопожатии.
     webSocket.onValidateHttpHeader(wsValidateHeader, WS_HEADERS, 0);
+    // Пропавшую без закрытия вкладку отключаем сами, иначе рассылка ей вешает
+    // loop(): почему и откуда цифры — в config.h у WS_PING_INTERVAL_MS.
+    webSocket.enableHeartbeat(WS_PING_INTERVAL_MS, WS_PONG_TIMEOUT_MS, WS_PONG_MISSES);
 
     Serial.println("HTTP :80  WS :81");
 }
