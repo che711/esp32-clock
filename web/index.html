@@ -429,7 +429,7 @@
   /* Состояние заряда красит плитку целиком, а не только заливку иконки.
      Раньше цвет менялся у одной полоски шириной 32 px — заметить её краем
      глаза было невозможно, а именно для этого индикатор и нужен.
-     Пороги приходят с устройства (bat_warn_pct / bat_crit_pct), поэтому
+     Пороги приходят с устройства (bat_sign_pct / bat_screen_off_pct), поэтому
      дашборд и экран часов зажигают тревогу одновременно. */
   #bat-tile { transition: background 0.4s, box-shadow 0.4s; }
   #bat-tile .kv-big, #bat-tile .batt-icon,
@@ -889,6 +889,10 @@
         <button class="curl-copy" onclick="copyCmd('curl-weather',this)">copy</button>
       </div>
       <div class="curl-row">
+        <code class="curl-line" id="curl-history" data-cmd="curl http://{ip}/api/history">curl http://&lt;IP&gt;/api/history</code>
+        <button class="curl-copy" onclick="copyCmd('curl-history',this)">copy</button>
+      </div>
+      <div class="curl-row">
         <code class="curl-line" id="curl-bright" data-cmd='curl -X POST http://{ip}/api/brightness -d "value=80"'>curl -X POST http://&lt;IP&gt;/api/brightness -d "value=80"</code>
         <button class="curl-copy" onclick="copyCmd('curl-bright',this)">copy</button>
       </div>
@@ -903,6 +907,10 @@
       <div class="curl-row">
         <code class="curl-line" id="curl-power-on" data-cmd='curl -X POST http://{ip}/api/power -d "on=1"'>curl -X POST http://&lt;IP&gt;/api/power -d "on=1"</code>
         <button class="curl-copy" onclick="copyCmd('curl-power-on',this)">copy</button>
+      </div>
+      <div class="curl-row">
+        <code class="curl-line" id="curl-powermode" data-cmd='curl -X POST http://{ip}/api/powermode -d "mode=eco"'>curl -X POST http://&lt;IP&gt;/api/powermode -d "mode=eco"</code>
+        <button class="curl-copy" onclick="copyCmd('curl-powermode',this)">copy</button>
       </div>
       <div class="curl-row">
         <code class="curl-line" id="curl-reboot" data-cmd="curl -X POST http://{ip}/api/reboot">curl -X POST http://&lt;IP&gt;/api/reboot</code>
@@ -1525,10 +1533,27 @@
   let pmPinned  = false;      // секундомер держит normal поверх выбора
   let pmPending = false;
 
-  const PM_HINT = {
-    normal: 'Screen always on, sensor every 60 s, radio at full power. The stopwatch switches here on its own and hands the level back on reset.',
-    eco:    'Default level. Screen dimmed and off 22:00\u201306:00, sensor every 2 min, radio sleeps longer between beacons.'
-  };
+  // Часы ночи и периоды опроса приходят в снимке, а не зашиты в текст:
+  // раньше здесь стояли свои «22:00–06:00», «60 s» и «2 min», и правка
+  // config.h молча делала подсказку враньём. До первого кадра чисел нет —
+  // подсказка тогда просто без них.
+  let pmSched = null;   // { on, off, normalS, ecoS }
+  function everyTxt(s) { return s >= 120 && s % 60 === 0 ? (s / 60) + ' min' : s + ' s'; }
+  function hourTxt(h)  { return (h < 10 ? '0' : '') + h + ':00'; }
+  function pmHint(k) {
+    const sc = pmSched;
+    if (k === 'normal') {
+      return 'Screen always on' + (sc ? ', sensor every ' + everyTxt(sc.normalS) : '') +
+             ', radio at full power. The stopwatch switches here on its own and hands the level back on reset.';
+    }
+    if (k === 'eco') {
+      return 'Default level. Screen dimmed and off' +
+             (sc ? ' ' + hourTxt(sc.on) + '\u2013' + hourTxt(sc.off) + ', sensor every ' + everyTxt(sc.ecoS)
+                 : ' at night') +
+             ', radio sleeps longer between beacons.';
+    }
+    return '';
+  }
   const PM_PINNED_HINT = 'Stopwatch is running: the clock is held at normal so the count stays visible, and takes this level back on reset. ';
 
   function _applyPowerModeUI() {
@@ -1543,7 +1568,7 @@
     document.getElementById('pm-label').textContent =
       pmPinned ? pmChosen + ' \u00b7 running ' + pmMode : pmMode;
     document.getElementById('pm-hint').textContent =
-      (pmPinned ? PM_PINNED_HINT : '') + (PM_HINT[shown] || '');
+      (pmPinned ? PM_PINNED_HINT : '') + pmHint(shown);
   }
   _applyPowerModeUI();
 
@@ -1576,18 +1601,28 @@
 
   // ── WebSocket ────────────────────────────────────────
   let ws, wsReconnectTimer, sawFirstFrame = false, frameErrLogged = false;
+  // Каждый обработчик сверяет, что его сокет всё ещё текущий. Закрытие
+  // асинхронное: свернули вкладку, close() ушёл, вкладку вернули раньше, чем
+  // пришёл onclose, — и запоздалый onclose старого сокета гасил статус нового,
+  // заводил ещё один реконнект, а новый сокет оставался жить без присмотра.
+  // Два живых сокета давали два потока кадров, и счётчики min/avg/max видели
+  // каждое показание дважды.
   function wsConnect() {
+    clearTimeout(wsReconnectTimer);   // реконнект мог уже стоять в очереди
     swServerSynced = false;   // при новом коннекте заново берём состояние секундомера
     setWsStatus(false);       // пока не подключились — кнопки заблокированы
-    ws = new WebSocket('ws://' + location.hostname + ':81/');
-    ws.onopen    = () => {
+    const sock = new WebSocket('ws://' + location.hostname + ':81/');
+    ws = sock;
+    sock.onopen    = () => {
+      if (sock !== ws) { sock.close(); return; }
       setWsStatus(true); clearTimeout(wsReconnectTimer); logEvent('ok', 'WebSocket connected');
       // Именно на каждом коннекте, а не только при загрузке страницы: пока
       // связи не было, прошивка мерила дальше — переподключение обязано
       // подобрать этот кусок, иначе в графике останется дырка.
       fetchHistory();
     };
-    ws.onmessage = (e) => {
+    sock.onmessage = (e) => {
+      if (sock !== ws) return;
       if (typeof e.data === 'string' && e.data.startsWith('pong:')) { swOnPong(e.data); return; }
       // Кадр роняет либо битый JSON, либо ошибка в ingest/render. Раньше здесь
       // стоял пустой catch, и оба случая выглядели одинаково: связь «Live»,
@@ -1607,12 +1642,14 @@
         }
       }
     };
-    ws.onclose   = () => {
+    sock.onclose   = () => {
+      if (sock !== ws) return;         // сокет уже сменили — он не наш
       setWsStatus(false);
+      if (wsHidden) return;            // сокет закрыли мы сами, уйдя в фон
       logEvent('error', 'WebSocket disconnected — retrying in 3s');
       wsReconnectTimer = setTimeout(wsConnect, 3000);
     };
-    ws.onerror   = () => ws.close();
+    sock.onerror   = () => sock.close();
   }
   function setWsStatus(ok) {
     const cls = 'ws-dot ' + (ok ? 'connected' : 'disconnected');
@@ -1625,6 +1662,28 @@
     document.getElementById('sw-reset-btn').disabled = !ok;
     if (!ok) document.getElementById('sw-lap-btn').disabled = true;
   }
+
+  // ── Вкладка в фоне ───────────────────────────────────
+  // Снимок раз в секунду будит радио часов: передача, приём подтверждения и
+  // окно активности после них. Вкладка, забытая открытой на сутки, платит за
+  // это током из банки — а показывать ей в фоне нечего, кадры всё равно никто
+  // не видит. Поэтому на время фона рвём сокет, а при возвращении поднимаем
+  // заново: при подключении вкладка и так забирает и состояние, и историю
+  // целиком, так что пропущенное не теряется.
+  let wsHidden = false;
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      if (wsHidden || !ws) return;
+      wsHidden = true;
+      clearTimeout(wsReconnectTimer);   // фоновый ретрай нам ни к чему
+      logEvent('info', 'Tab hidden — telemetry paused');
+      try { ws.close(); } catch (e) {}
+    } else if (wsHidden) {
+      wsHidden = false;
+      logEvent('info', 'Tab visible — reconnecting');
+      wsConnect();
+    }
+  });
 
   // ── Полоса секунд ────────────────────────────────────
   let lastSecPct = 0;
@@ -1804,8 +1863,10 @@
     // зашиты здесь: копия неизбежно разъезжается с прошивкой, как разъехалось
     // прежнее «< 30 %» после правки кривой. Значения по умолчанию — только
     // на случай снимка от старой прошивки.
-    const warnAt = d.bat_warn_pct !== undefined ? d.bat_warn_pct : 20;
-    const critAt = d.bat_crit_pct !== undefined ? d.bat_crit_pct : 5;
+    // warn — с порога, где на часах встаёт перечёркнутая батарея, crit — с
+    // порога, где гаснет экран.
+    const warnAt = d.bat_sign_pct       !== undefined ? d.bat_sign_pct       : 20;
+    const critAt = d.bat_screen_off_pct !== undefined ? d.bat_screen_off_pct : 5;
     const batState = !d.bat_valid ? (d.bat_state === 'over' ? 'crit' : 'none')
                    : d.bat_pct <= critAt ? 'crit'
                    : d.bat_pct <= warnAt ? 'warn'
@@ -1868,6 +1929,11 @@
     }
     lastScreenPeek = peek;
 
+    if (d.night_on !== undefined) {
+      const sc = { on: d.night_on, off: d.night_off, normalS: d.sensor_normal_s, ecoS: d.sensor_eco_s };
+      if (JSON.stringify(sc) !== JSON.stringify(pmSched)) { pmSched = sc; _applyPowerModeUI(); }
+    }
+
     if (!pmPending && d.power_mode !== undefined) {
       const chosen  = d.power_chosen || d.power_mode;
       const pinned  = d.power_pinned === true;
@@ -1919,17 +1985,38 @@
   }
   function stamp() { return (deviceTime || '').replace(/:/g, '-'); }
 
+  // CSV — это измерения устройства, а не кадры вкладки. Кадры идут раз в
+  // секунду, и одно показание датчика повторяется в них по сто раз: тысяча
+  // строк покрывала семнадцать минут, причём теми же числами. В /api/history
+  // лежит по точке на каждое чтение BMP280 (6 часов в normal, 12 в eco) и
+  // напряжение банки — то, ради чего выгрузка и нужна: прогон до отсечки.
   function exportCsv() {
-    if (!samples.length) { showToast('No samples collected yet'); return; }
-    const cols = ['time','uptime','bmp_temp','pressure','trend','chip_temp','rssi','ram_free','bat_pct','bat_v'];
-    const rows = [cols.join(',')];
-    samples.forEach(function(s) {
-      rows.push(cols.map(function(c) { return s[c] === null || s[c] === undefined ? '' : s[c]; }).join(','));
-    });
-    download('esp32-clock-' + stamp() + '.csv', 'text/csv', rows.join('\n'));
-    logEvent('ok', 'Exported ' + samples.length + ' samples to CSV');
+    fetch('/api/history')
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        const n = (j && j.n) || 0;
+        if (!n) { showToast('Device history is empty'); return; }
+        const now = Date.now();
+        const num = function(col, i) {
+          return (Array.isArray(col) && typeof col[i] === 'number') ? col[i] : '';
+        };
+        const rows = ['time,age_s,temp_c,pressure_hpa,trend_hpa_h,battery_v'];
+        for (let i = 0; i < n; i++) {
+          const age = num(j.age, i);
+          rows.push([
+            new Date(now - (age || 0) * 1000).toISOString(), age,
+            num(j.temp, i), num(j.press, i), num(j.trend, i), num(j.bat, i)
+          ].join(','));
+        }
+        download('esp32-clock-' + stamp() + '.csv', 'text/csv', rows.join('\n'));
+        logEvent('ok', 'Exported ' + n + ' device readings to CSV');
+      })
+      .catch(function() { logEvent('error', 'History unavailable — nothing exported'); });
   }
 
+  // JSON остаётся снимком вкладки: счётчики min/avg/max и посекундные кадры
+  // с RSSI, свободной кучей и температурой чипа — тем, чего в истории
+  // устройства нет.
   function exportJson() {
     if (!samples.length) { showToast('No samples collected yet'); return; }
     const out = {

@@ -23,12 +23,20 @@ bool sensorInit() {
         return false;
     }
 
+    // Профиль «weather monitoring» из даташита Bosch: forced, ×1/×1, без
+    // фильтра. Раньше стояли ×2/×16 и IIR ×4. Фильтр в forced-режиме хранит
+    // состояние между замерами, а замеры тут раз в одну-две минуты, — так
+    // что он сглаживал не шум, а саму погоду: ступенька давления доходила
+    // до показаний за несколько замеров, то есть за минуты. Оверсэмплинг ×16
+    // давит шум, который на минутном шаге и так ниже порога тренда
+    // (±0.5 гПа/ч против ~0.03 гПа шума на ×1). Standby в forced не
+    // используется, стоит для полноты вызова.
     bmp.setSampling(
         Adafruit_BMP280::MODE_FORCED,
-        Adafruit_BMP280::SAMPLING_X2,
-        Adafruit_BMP280::SAMPLING_X16,
-        Adafruit_BMP280::FILTER_X4,
-        Adafruit_BMP280::STANDBY_MS_500
+        Adafruit_BMP280::SAMPLING_X1,
+        Adafruit_BMP280::SAMPLING_X1,
+        Adafruit_BMP280::FILTER_OFF,
+        Adafruit_BMP280::STANDBY_MS_1
     );
 
     bmpInitialized = true;
@@ -73,22 +81,4 @@ SensorData sensorRead() {
     data.forecastIcon  = forecastFromTrend(data.pressureTrend, history.count);
 
     return data;
-}
-
-const char* forecastText(uint8_t icon) {
-    switch (icon) {
-        case 1: return "Ясно";
-        case 2: return "Переменно";
-        case 3: return "Осадки";
-        default: return "Нет данных";
-    }
-}
-
-const char* forecastEmoji(uint8_t icon) {
-    switch (icon) {
-        case 1: return "☀️";
-        case 2: return "⛅";
-        case 3: return "🌧️";
-        default: return "❓";
-    }
 }

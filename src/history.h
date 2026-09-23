@@ -19,7 +19,7 @@
 // ============================================================
 
 // 360 точек: в normal (чтение раз в минуту) это 6 часов, в eco
-// (раз в две) — 12. Точка занимает 20 байт, всё кольцо — 7 КБ.
+// (раз в две) — 12. Точка занимает 24 байта, всё кольцо — 8.6 КБ.
 #define TREND_HISTORY_SIZE 360
 
 struct TrendSample {
@@ -28,6 +28,12 @@ struct TrendSample {
     float    press;     // гПа   | не ответил: дырка в графике честнее
     float    alt;       // м     | склейки соседних точек прямой
     float    trend;     // гПа/ч |
+    // Напряжение банки. На датчик не завязано: он может молчать, а банка
+    // при этом измеряется — поэтому NAN здесь свой, «банки нет», а не общий
+    // с четырьмя полями выше. Едет в той же точке, потому что вопрос
+    // «сколько мА·ч в окне 4.20…3.65 В» решается одним прогоном до отсечки,
+    // а для него нужны и напряжение, и время, и то и другое уже тут.
+    float    bat;       // В на банке, NAN — банки нет
 };
 
 struct TrendHistory {
@@ -35,14 +41,17 @@ struct TrendHistory {
     uint16_t    idx   = 0;   // слот СЛЕДУЮЩЕЙ записи
     uint16_t    count = 0;
 
+    // bv со значением по умолчанию: вызовы с шестью аргументами (тесты)
+    // продолжают собираться и кладут в точку «банки нет».
     void push(uint32_t nowMs, bool valid,
-              float t, float p, float a, float tr) {
+              float t, float p, float a, float tr, float bv = NAN) {
         TrendSample& s = pts[idx];
         s.stampMs = nowMs;
         s.temp    = valid ? t  : NAN;
         s.press   = valid ? p  : NAN;
         s.alt     = valid ? a  : NAN;
         s.trend   = valid ? tr : NAN;
+        s.bat     = bv;
         idx = (idx + 1) % TREND_HISTORY_SIZE;
         if (count < TREND_HISTORY_SIZE) count++;
     }

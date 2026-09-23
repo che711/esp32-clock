@@ -1,4 +1,6 @@
 .pio
+# Wi-Fi: локальный файл с логином и паролем, подхватывается src/config.h
+src/secrets.h
 .claude/settings.local.json
 .vscode/
 .vscode/.browse.c_cpp.db*

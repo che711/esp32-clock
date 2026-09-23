@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "config.h"   // только макросы, без Arduino: собирается и нативно
 
 // ─── Единая шкала контраста ───────────────────────────────
 // SSD1322 принимает контраст 0..255. Держим одну константу,
@@ -56,8 +57,15 @@ static const uint8_t CONTRAST_DAY     = 228;   // ≈ 78.5 %     (было 200/2
 // дашборду о яркости, — так что теперь это порог читаемости и только он.
 static const uint8_t CONTRAST_MIN_VISIBLE = CONTRAST_NIGHT;
 
+// Ночь — те же часы, что гасят экран в экономе (POWER_NIGHT_*_HOUR): раньше
+// здесь стояли свои 22 и 6, и правка расписания в config.h молча разводила
+// «экран погас» и «экран потускнел» по разным часам. Окно через полночь
+// поддержано, как и в hourInWindow() (power_calc.h).
 inline BrightnessLevel brightnessForHour(int hour) {
-    if (hour >= 22 || hour < 6)  return { CONTRAST_NIGHT,   "Night"   };
+    const bool night = (POWER_NIGHT_ON_HOUR > POWER_NIGHT_OFF_HOUR)
+        ? (hour >= POWER_NIGHT_ON_HOUR || hour < POWER_NIGHT_OFF_HOUR)
+        : (hour >= POWER_NIGHT_ON_HOUR && hour < POWER_NIGHT_OFF_HOUR);
+    if (night)                   return { CONTRAST_NIGHT,   "Night"   };
     if (hour < 8)                return { CONTRAST_MORNING, "Morning" };
     if (hour < 20)               return { CONTRAST_DAY,     "Day"     };
     return                              { CONTRAST_EVENING, "Evening" };
@@ -129,6 +137,32 @@ inline void formatStopwatch(uint32_t ms, char* buf, size_t sz) {
 // ─── Валидация JSON-поля ──────────────────────────────────
 inline bool jsonContainsKey(const char* json, const char* key) {
     return strstr(json, key) != nullptr;
+}
+
+// ─── Строка → содержимое JSON-литерала ───────────────────
+// Кавычка, обратный слеш и управляющие символы экранируются, остальное —
+// как есть (UTF-8 в JSON допустим). Нужна для строк, которые приходят не из
+// прошивки: SSID задаёт пользователь, и одна кавычка в имени сети без этого
+// ломала каждый снимок — JSON.parse падал, дашборд замирал.
+//
+// false — не влезло; вывод тогда обрезан по целой последовательности и
+// завершён нулём. Худший случай — шесть байт на символ (\u00XX).
+inline bool jsonEscape(const char* in, char* out, size_t sz) {
+    if (!out || sz == 0) return false;
+    size_t o = 0;
+    for (; in && *in; in++) {
+        unsigned char c = (unsigned char)*in;
+        char   esc[8];
+        size_t n;
+        if (c == '"' || c == '\\') { esc[0] = '\\'; esc[1] = (char)c; n = 2; }
+        else if (c < 0x20)         { n = (size_t)snprintf(esc, sizeof(esc), "\\u%04x", c); }
+        else                       { esc[0] = (char)c; n = 1; }
+        if (o + n >= sz) { out[o] = '\0'; return false; }
+        memcpy(out + o, esc, n);
+        o += n;
+    }
+    out[o] = '\0';
+    return true;
 }
 
 // ─── WiFi signal → уровень 1–4 ───────────────────────────

@@ -19,8 +19,7 @@
 void powerBegin();      // применить стартовый уровень, вызвать в setup()
 void powerLoop();       // поправка на секундомер, вызывать из loop()
 
-PowerMode   powerCurrent();       // что работает прямо сейчас
-const char* powerModeName();
+const char* powerModeName();      // что работает прямо сейчас
 PowerMode   powerChosenMode();    // что выбрано пользователем
 
 void powerSetMode(PowerMode m);   // выбрать уровень
@@ -41,6 +40,11 @@ bool     powerLedEnabled();
 bool     powerScreenBatteryOkNow();       // false — заряд на исходе, панель гасим
 bool     powerScreenScheduleAllowsNow(int hour);
 
-// Радио сконфигурировать под текущий профиль. Вызывать после
-// подключения: до него esp_wifi_* возвращают ошибку.
+// Радио сконфигурировать под текущий профиль и состояние секундомера:
+// мощность и глубину сна. Вызывать после подключения и на каждой смене
+// состояния секундомера; без связи ничего не делает.
 void powerApplyRadio();
+
+// Интервал прослушивания — в конфиг STA между WiFi.begin(..., false) и
+// esp_wifi_connect(): после ассоциации точка доступа его уже не узнает.
+void powerPrepareAssociation();

@@ -65,9 +65,14 @@ static void publishDiscovery() {
 }
 #endif  // MQTT_HA_DISCOVERY
 
-// ── Реконнект (неблокирующий) ─────────────────────────────────
+// ── Реконнект ─────────────────────────────────────────────────
+// Не блокирующий он только между попытками: сама попытка синхронная и держит
+// loop() до MQTT_CONNECT_TIMEOUT_MS + MQTT_SOCKET_TIMEOUT_S (config.h).
+// Раньше функция называлась неблокирующей и стучалась к брокеру и без Wi-Fi —
+// каждые 5 с заведомо пустой connect() на полный таймаут.
 static bool mqttReconnect() {
     if (mqttClient.connected()) return true;
+    if (WiFi.status() != WL_CONNECTED) return false;
 
     unsigned long now = millis();
     if (now - _lastReconnect < MQTT_RECONNECT_MS) return false;
@@ -146,6 +151,8 @@ static void publishData(const SensorData& d, const BatteryData& bat) {
 void mqttInit() {
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
     mqttClient.setKeepAlive(60);
+    wifiClient.setConnectionTimeout(MQTT_CONNECT_TIMEOUT_MS);
+    mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_S);
     mqttClient.setBufferSize(768);  // discovery-payload крупнее данных
     Serial.println("[MQTT] Клиент настроен.");
 }

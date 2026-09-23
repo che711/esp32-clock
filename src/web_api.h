@@ -13,4 +13,3 @@ void webApiLoop();        // обслуживание клиентов, вызы
 void webApiBroadcast();   // разослать снимок состояния по WebSocket
 
 uint8_t  webApiClientCount();
-uint32_t webApiRequestCount();

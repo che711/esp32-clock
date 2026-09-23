@@ -43,11 +43,46 @@ static int  swMsX = 0, swMsBoxX = -1, swMsBoxW = 0;
 // и полный кадр нужен раз в секунду, а не на каждый вызов.
 static char swLastFull[16] = "";
 
+#if HAS_DISPLAY
+// Снимок последнего отправленного кадра. На циферблате секунд нет: HH:MM,
+// температура и нижняя строка меняются раз в минуту, а полный кадр уходил в
+// панель каждую секунду — 8 КБ по SPI плюс распаковка 1 бит → 4 бита на
+// каждый тайл. Сравнение буфера стоит микросекунды и снимает почти всю эту
+// работу; заметно это станет после перехода на light sleep, где процессор
+// начнёт спать между кадрами.
+//
+// Сравниваем сам буфер, а не «ключ» из полей раскладки: ключ пришлось бы
+// дополнять при каждой правке кадра, а цена забытого поля — замерший экран,
+// который ничем себя не выдаёт.
+static uint8_t lastFrame[2048];        // 256×64 бит — ровно буфер u8g2 (_F_)
+static bool    lastFrameValid = false; // false — что лежит в панели, мы не знаем
+
+static size_t frameBytes() {
+    return (size_t)u8g2.getBufferTileWidth() * u8g2.getBufferTileHeight() * 8;
+}
+
+// Запомнить то, что сейчас в буфере, как содержимое панели.
+static void rememberFrame() {
+    if (frameBytes() != sizeof(lastFrame)) { lastFrameValid = false; return; }
+    memcpy(lastFrame, u8g2.getBufferPtr(), sizeof(lastFrame));
+    lastFrameValid = true;
+}
+
+static void sendFrameIfChanged() {
+    if (lastFrameValid && frameBytes() == sizeof(lastFrame)
+        && memcmp(u8g2.getBufferPtr(), lastFrame, sizeof(lastFrame)) == 0)
+        return;
+    u8g2.sendBuffer();
+    rememberFrame();
+}
+#endif
+
 // ─── Инициализация ────────────────────────────────────────
 void displayBegin() {
 #if HAS_DISPLAY
     SPI.begin(OLED_CLK_PIN, -1, OLED_DIN_PIN, OLED_CS_PIN);
     u8g2.begin();
+    lastFrameValid = false;   // инициализация очистила память панели
     refreshPanel();
 #endif
 }
@@ -57,7 +92,7 @@ void displaySplash(const char* msg) {
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x10_tr);
     u8g2.drawStr(50, 35, msg);
-    u8g2.sendBuffer();
+    sendFrameIfChanged();
 #else
     (void)msg;
 #endif
@@ -97,6 +132,12 @@ static void refreshPanel() {
 // панели. Теперь отказ виден снаружи — им занимается screenSetPower().
 void displaySetPower(bool on) {
     displayOn = on;
+#if HAS_DISPLAY
+    // Пока панель была тёмной, её могли сбросить (глитч питания, помеха по
+    // RST), и сверяться со снимком больше не с чем. Первый кадр после
+    // включения шлём целиком, дальше снова по изменению.
+    if (on) lastFrameValid = false;
+#endif
     refreshPanel();
     Serial.printf("Display -> %s\n", panelLit() ? "ON" : "OFF");
 }
@@ -391,7 +432,7 @@ void displayDraw() {
         swLastFull[0] = '\0';          // и сверять следующий кадр не с чем
     }
 
-    u8g2.sendBuffer();
+    sendFrameIfChanged();
 #endif
 }
 
@@ -427,5 +468,8 @@ void displayStopwatchFrame() {
     u8g2.setFont(u8g2_font_logisoso24_tr);
     u8g2.drawStr(swMsX, 50, full + 5);
     u8g2.updateDisplayArea(swMsBoxX / 8, 3, swMsBoxW / 8, 4);
+    // Полоска уехала в панель — снимок полного кадра обязан это учесть,
+    // иначе следующий полный кадр может показаться «таким же» и не уйти.
+    if (lastFrameValid) rememberFrame();
 #endif
 }
