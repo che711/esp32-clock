@@ -22,9 +22,14 @@ static uint32_t         requestCount = 0;
 // Буфер снимка. Один на все три места, где он собирается, — иначе при
 // добавлении поля легко нарастить формат и забыть один из них: snprintf
 // обрежет строку молча, и дашборд получит JSON без закрывающей скобки.
-// Сейчас снимок занимает ~730 байт; запас — на длинный SSID и на пару
+// Сейчас снимок занимает ~830 байт; запас — на длинный SSID и на пару
 // будущих полей.
 static const size_t JSON_BUF = 1280;
+
+// SSID в снимке — уже экранированный: имя сети задаёт пользователь, и кавычка
+// в нём рвала JSON. Строка постоянная, поэтому готовится один раз в
+// webApiBegin(), а не на каждый кадр. 32 байта SSID × 6 на худший символ.
+static char ssidJson[32 * 6 + 1] = "";
 
 // ─── Защита изменяющих запросов ───────────────────────────
 // Любая открытая в браузере страница может отправить нам POST или открыть
@@ -92,7 +97,7 @@ static void buildJson(char* buf, size_t sz) {
         "\"ssid\":\"%s\","
         "\"ip\":\"%s\","
         "\"rssi\":%d,"
-        "\"temp\":\"%.1f\","
+        "\"temp\":%.1f,"
         "\"clients\":%d,"
         "\"ram_free\":%lu,"
         "\"ram_total\":%lu,"
@@ -117,19 +122,23 @@ static void buildJson(char* buf, size_t sz) {
         "\"bat_state\":\"%s\","
         "\"bat_mah\":%d,"
         "\"bat_mah_full\":%d,"
-        "\"bat_warn_pct\":%d,"
-        "\"bat_crit_pct\":%d,"
+        "\"bat_sign_pct\":%d,"
+        "\"bat_screen_off_pct\":%d,"
         "\"bat_low\":%s,"
         "\"power_mode\":\"%s\","
         "\"power_chosen\":\"%s\","
         "\"power_pinned\":%s,"
+        "\"night_on\":%d,"
+        "\"night_off\":%d,"
+        "\"sensor_normal_s\":%lu,"
+        "\"sensor_eco_s\":%lu,"
         "\"reset_reason\":\"%s\","
         "\"reset_abnormal\":%s,"
         "\"requests\":%lu"
         "}",
         timeBuf, dateBuf, dayFullBuf,
         uptimeBuf,
-        WIFI_SSID, localIP.c_str(),
+        ssidJson, localIP.c_str(),
         (int)WiFi.RSSI(),
         (float)dieTempC(),
         (int)webSocket.connectedClients(),
@@ -160,12 +169,21 @@ static void buildJson(char* buf, size_t sz) {
         // ровно то же, что показывают сами часы. Зашитые копии уже разъезжались
         // с прошивкой — после правки кривой «< 30 %» в UI перестало значить
         // что-либо. Два лишних числа в секунду дешевле такого расхождения.
+        // Имена — по тому, что порог делает на часах: раньше поля звались
+        // warn/crit по цвету плитки, и crit нёс порог гашения экрана, а не
+        // BATTERY_CRITICAL_PCT — читать это было нельзя без исходников.
         (int)BATTERY_CRITICAL_PCT,
         (int)POWER_SCREEN_OFF_PCT,
         battery.low ? "true" : "false",
         powerModeName(),
         powerProfile(powerChosenMode()).name,
         powerIsHeld() ? "true" : "false",
+        // Расписание и периоды опроса — для подсказок к уровням в дашборде:
+        // по той же причине, что и пороги выше, копии там не держим.
+        (int)POWER_NIGHT_ON_HOUR,
+        (int)POWER_NIGHT_OFF_HOUR,
+        (unsigned long)(powerProfile(POWER_NORMAL).sensorMs / 1000UL),
+        (unsigned long)(powerProfile(POWER_ECO).sensorMs / 1000UL),
         resetReasonName(),
         resetWasAbnormal() ? "true" : "false",
         (unsigned long)requestCount
@@ -326,6 +344,9 @@ static void handleApiHistory() {
     writeSeries(out, "temp",  "%.2f", &TrendSample::temp);
     writeSeries(out, "press", "%.2f", &TrendSample::press);
     writeSeries(out, "trend", "%.2f", &TrendSample::trend);
+    // Милливольты, а не сотые: на хвосте кривой пункт шкалы стоит 5 мВ, и
+    // округление до 0.01 В склеило бы соседние проценты в одно число.
+    writeSeries(out, "bat",   "%.3f", &TrendSample::bat);
 
     out.put("}");
     out.flush();
@@ -475,6 +496,8 @@ static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t 
 
 // ─── Публичный API ────────────────────────────────────────
 void webApiBegin() {
+    jsonEscape(WIFI_SSID, ssidJson, sizeof(ssidJson));
+
     server.collectHeaders(COLLECTED_HEADERS,
                           sizeof(COLLECTED_HEADERS) / sizeof(COLLECTED_HEADERS[0]));
 
@@ -508,4 +531,3 @@ void webApiLoop() {
 }
 
 uint8_t  webApiClientCount()  { return webSocket.connectedClients(); }
-uint32_t webApiRequestCount() { return requestCount; }

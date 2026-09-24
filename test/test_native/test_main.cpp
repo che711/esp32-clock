@@ -1113,6 +1113,60 @@ void test_json_missing_key() {
     TEST_ASSERT_FALSE(jsonContainsKey(json, "\"cpu\""));
 }
 
+// ─── jsonEscape: SSID и прочие чужие строки в снимке ─────
+void test_json_escape_plain_passthrough() {
+    char out[32];
+    TEST_ASSERT_TRUE(jsonEscape("SkyNet 5G", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("SkyNet 5G", out);
+}
+
+// Ради этого функция и появилась: кавычка в имени сети рвала весь снимок.
+void test_json_escape_quote_and_backslash() {
+    char out[32];
+    TEST_ASSERT_TRUE(jsonEscape("a\"b\\c", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("a\\\"b\\\\c", out);
+}
+
+void test_json_escape_control_chars() {
+    char out[32];
+    TEST_ASSERT_TRUE(jsonEscape("x\ty\x01", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("x\\u0009y\\u0001", out);
+}
+
+// UTF-8 в JSON допустим и идёт как есть: кириллический SSID не должен
+// превращаться в кашу из \u-последовательностей по байтам.
+void test_json_escape_utf8_untouched() {
+    char out[32];
+    TEST_ASSERT_TRUE(jsonEscape("Сеть", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("Сеть", out);
+}
+
+// Не влезло — false, и обрезано по целой последовательности: половина
+// «\"» в выводе оставила бы висящий слеш, который съест закрывающую кавычку.
+void test_json_escape_overflow_cuts_whole_sequence() {
+    char out[4];
+    TEST_ASSERT_FALSE(jsonEscape("ab\"c", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("ab", out);
+}
+
+// Граница: строка плюс завершающий ноль ровно в буфер — это ещё успех.
+void test_json_escape_exact_fit() {
+    char out[4];
+    TEST_ASSERT_TRUE(jsonEscape("abc", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("abc", out);
+}
+
+// Худший случай из web_api.cpp: 32 управляющих символа по 6 байт — буфер
+// 32 * 6 + 1 обязан вместить SSID любой длины.
+void test_json_escape_worst_case_ssid_fits() {
+    char in[33];
+    memset(in, 0x01, 32);
+    in[32] = '\0';
+    char out[32 * 6 + 1];
+    TEST_ASSERT_TRUE(jsonEscape(in, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_size_t(32 * 6, strlen(out));
+}
+
 // ─── Runner ───────────────────────────────────────────────
 int main(int argc, char** argv) {
     (void)argc; (void)argv;
@@ -1292,6 +1346,13 @@ int main(int argc, char** argv) {
     RUN_TEST(test_json_contains_time_key);
     RUN_TEST(test_json_contains_date_key);
     RUN_TEST(test_json_missing_key);
+    RUN_TEST(test_json_escape_plain_passthrough);
+    RUN_TEST(test_json_escape_quote_and_backslash);
+    RUN_TEST(test_json_escape_control_chars);
+    RUN_TEST(test_json_escape_utf8_untouched);
+    RUN_TEST(test_json_escape_overflow_cuts_whole_sequence);
+    RUN_TEST(test_json_escape_exact_fit);
+    RUN_TEST(test_json_escape_worst_case_ssid_fits);
 
     return UNITY_END();
 }

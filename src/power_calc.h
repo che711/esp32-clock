@@ -43,7 +43,8 @@ struct PowerProfile {
     uint8_t     contrastPct;     // масштаб авто-яркости, % от штатной
     bool        led;             // мигок WS2812 на каждый опрос
     bool        screenWindow;    // гасить экран вне рабочего окна
-    uint8_t     listenInterval;  // маячков между пробуждениями радио
+    uint8_t     listenInterval;  // маячков между пробуждениями радио; 1 — MIN_MODEM
+                                 // (каждый DTIM), больше — MAX_MODEM (power.cpp)
     int8_t      txDbm;           // мощность передатчика
 };
 

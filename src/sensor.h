@@ -23,5 +23,3 @@ struct SensorData {
 bool       sensorInit();
 SensorData sensorRead();
 
-const char* forecastText(uint8_t icon);
-const char* forecastEmoji(uint8_t icon);

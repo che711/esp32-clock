@@ -30,25 +30,55 @@ static wifi_power_t txPowerFor(int8_t dbm) {
     return WIFI_POWER_7dBm;
 }
 
+// listen_interval — сколько маячков радио пропускает между пробуждениями.
+// Точка доступа узнаёт его из запроса на ассоциацию и под него держит
+// буфер, поэтому задать его можно только до подключения. Раньше он писался
+// в конфиг после связи и при каждой смене режима — и не действовал: радио
+// жило с тем, что WiFi.begin() оставил в конфиге (0, то есть 3 по умолчанию
+// IDF), до ближайшего переподключения.
+//
+// Значение одно на все режимы — самое длинное из профилей. Смотрит на него
+// только MAX_MODEM, а MAX_MODEM берёт лишь профиль с интервалом больше
+// единицы; профиль с единицей работает на MIN_MODEM (см. powerApplyRadio).
+// Короче интервала, заявленного точке, радио спать не обязано, так что
+// лишнего запаса это не стоит.
+void powerPrepareAssociation() {
+    uint8_t li = 1;
+    for (uint8_t m = POWER_NORMAL; m <= POWER_ECO; m++) {
+        uint8_t v = powerProfile((PowerMode)m).listenInterval;
+        if (v > li) li = v;
+    }
+    wifi_config_t cfg{};
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK) {
+        cfg.sta.listen_interval = li;
+        esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    }
+}
+
 void powerApplyRadio() {
     if (WiFi.status() != WL_CONNECTED) return;
     const PowerProfile& p = powerProfile(mode);
 
     WiFi.setTxPower(txPowerFor(p.txDbm));
 
-    // listen_interval — сколько маячков радио пропускает между
-    // пробуждениями. Больше интервал — холоднее радио, но входящий
-    // пакет ждёт дольше. Работает при любом modem sleep: под секундомером
-    // профиль normal ставит сюда 1, и вместе с MIN_MODEM это даёт задержку
-    // около десятой секунды.
-    wifi_config_t cfg{};
-    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK) {
-        cfg.sta.listen_interval = p.listenInterval;
-        esp_wifi_set_config(WIFI_IF_STA, &cfg);
-    }
-    // Пока идёт замер, сон ужат до MIN_MODEM ради отзывчивости кнопок
-    // (см. setRadioSaving в main.cpp) — обратно углублять его здесь нельзя.
-    if (stopwatch.idle()) esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+    // Глубина сна. MAX_MODEM холоднее всех, но входящий пакет ждёт до
+    // listen_interval маячков — под секундомером кнопка в браузере отзывалась
+    // бы с заметным опозданием. MIN_MODEM просыпается на каждый DTIM (обычно
+    // каждый маячок, ~100 мс): это ровно то, что профиль normal имел в виду
+    // своим интервалом 1, — только интервал в эфир так и не попадал.
+    //
+    // Сон не выключается никогда: без него приёмник горит постоянно, около
+    // 65 мА на ровном месте. Отсчёт секундомера идёт по millis() и от сна
+    // радио не зависит — страдает только доставка команд.
+    //
+    // На паузе — глубокий сон при любом профиле: счётчик заморожен, торопиться
+    // некуда, а уровень normal на паузе держится ради экрана, не ради радио.
+    wifi_ps_type_t ps;
+    if (stopwatch.running())      ps = WIFI_PS_MIN_MODEM;
+    else if (!stopwatch.idle())   ps = WIFI_PS_MAX_MODEM;
+    else                          ps = p.listenInterval > 1 ? WIFI_PS_MAX_MODEM
+                                                            : WIFI_PS_MIN_MODEM;
+    esp_wifi_set_ps(ps);
 }
 
 // Применить профиль целиком. Радио трогаем только если оно поднято —
@@ -84,7 +114,6 @@ void powerLoop() {
     applyProfile();
 }
 
-PowerMode   powerCurrent()    { return mode; }
 const char* powerModeName()   { return powerProfile(mode).name; }
 PowerMode   powerChosenMode() { return chosen; }
 bool        powerIsHeld()     { return mode != chosen; }

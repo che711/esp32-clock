@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
-#include <esp_wifi.h>
 #include <time.h>
 #include "config.h"
 #include "app.h"
@@ -37,8 +36,12 @@ static void historyPush(uint32_t nowMs) {
     // 5-й аргумент — бывшая высота. Она теперь константа (HOME_ALTITUDE_M),
     // дашборд её не рисует и /api/history не отдаёт; колонка в TrendSample
     // осталась только потому, что её выпиливание тянет правку теста.
+    // Напряжение банки едет в той же точке: это единственный журнал разряда,
+    // который переживает закрытую вкладку, и из него же берётся кривая для
+    // замера реальной ёмкости окна (BATTERY_USABLE_MAH в config.h).
     trendHistory.push(nowMs, weather.valid, weather.temperature,
-                      weather.pressure, HOME_ALTITUDE_M, weather.pressureTrend);
+                      weather.pressure, HOME_ALTITUDE_M, weather.pressureTrend,
+                      battery.valid ? battery.voltage : NAN);
 }
 
 static uint32_t lastSensorMs  = 0;
@@ -241,7 +244,8 @@ const char* screenSetPower(bool on) {
 // означал только «индикатор упёрся»: часы продолжали работать с погашенным
 // экраном примерно до 3.55 В, где чип уходит в brownout, — то есть поднятый
 // ради ресурса банки ноль защищал её лишь наполовину. Теперь на нуле мы
-// перестаём тянуть из элемента совсем: ~20 мкА во сне против ~25 мА.
+// перестаём тянуть из элемента совсем: ~20 мкА во сне по даташиту против
+// измеренных 60–80 мА с погашенным экраном (config.h, POWER_SLEEP_PCT).
 //
 // Будильник — таймер: физической кнопки нет, а подключение USB чип не
 // перезагружает (питание идёт через тот же диод). Поэтому раз в
@@ -291,26 +295,15 @@ static void checkBatteryEmpty() {
 }
 
 // ─── Секундомер: команды ─────────────────────────────────
-// Экономия радио. MAX_MODEM холоднее всех, но задерживает входящий пакет до
-// ~0.9 с: под секундомером это ощущается — кнопка в браузере откликается
-// с заметным опозданием. Поэтому на время замера сон ужимаем до MIN_MODEM
-// (пробуждение на каждый маячок, ~100 мс), а не выключаем.
-//
-// Раньше здесь стоял setSleep(false), то есть сон снимался совсем, и радио
-// держало приёмник включённым постоянно — около 65 мА на ровном месте.
-// Обосновано это было «точностью отсчёта», но отсчёт идёт по millis() и от
-// сна радио не зависит вовсе: страдала только доставка команд, а её хватает
-// и MIN_MODEM. Вместе с listen_interval = 1 из профиля normal задержка
-// выходит около десятой секунды.
-static void setRadioSaving(bool save) {
-    WiFi.setSleep(true);            // сон включён всегда, вопрос только в глубине
-    esp_wifi_set_ps(save ? WIFI_PS_MAX_MODEM : WIFI_PS_MIN_MODEM);
-}
+// Глубину сна радио под замер выбирает powerApplyRadio(): на ходу MIN_MODEM
+// ради отзывчивости кнопок, на паузе и в простое — по профилю. Раньше здесь
+// жила своя копия этого выбора (setRadioSaving), и две копии расходились:
+// переподключение посреди паузы оставляло радио не в той глубине.
 
 void swStart() {
     if (stopwatch.start(millis())) {
         displayInvalidateStopwatch();   // первый кадр после старта — полный
-        setRadioSaving(false);
+        powerApplyRadio();
 
         // Замер обязан быть виден, из какого бы режима и часа его ни начали.
         // powerLoop() здесь, а не на следующем обороте цикла: он поднимает
@@ -338,7 +331,7 @@ void swStart() {
 void swPause() {
     if (stopwatch.pause(millis())) {
         forceRedraw = true;             // маркер «II» — сразу, а не со сменой секунды
-        setRadioSaving(true);           // счётчик заморожен, точность больше не нужна
+        powerApplyRadio();              // счётчик заморожен, торопиться некуда
         Serial.println("Stopwatch PAUSE");
     }
 }
@@ -347,7 +340,7 @@ void swReset() {
     stopwatch.reset();
     forceRedraw = true;                 // вернуть часы на экран сразу, а не через секунду
     displayInvalidateStopwatch();
-    setRadioSaving(true);
+    powerApplyRadio();
     Serial.println("Stopwatch RESET");
 }
 
@@ -386,11 +379,10 @@ static void wifiOnConnected() {
     wifiReady = true;
     localIP = WiFi.localIP().toString();
     Serial.printf("\nIP: %s\n", localIP.c_str());
-    // Пока идёт замер секундомера, сон радио выключен ради точности отсчёта
-    // (см. setRadioSaving) — реконнект посреди замера включать его обратно
-    // не должен. Ровно та же оговорка, что и в powerApplyRadio().
-    if (stopwatch.idle()) setRadioSaving(true);
-    powerApplyRadio();          // мощность и listen_interval под режим
+    // Мощность и глубина сна — под режим и секундомер. Старт STA в ядре
+    // Arduino сбрасывает сон на MIN_MODEM, так что без этого вызова радио
+    // после переподключения работало бы не в своей глубине.
+    powerApplyRadio();
     // end() перед begin(): сюда заходят и повторно — после возврата из
     // выживания, где радио выключалось вместе с ответчиком mDNS.
     MDNS.end();
@@ -411,7 +403,13 @@ static void wifiBeginConnect() {
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(DEVICE_HOSTNAME);
     WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // begin() без подключения: он переписывает конфиг STA целиком, и
+    // listen_interval надо вписать после него, но до ассоциации —
+    // позже точка доступа его не узнает (см. powerPrepareAssociation).
+    // Переподключения, свои и авто, берут конфиг уже с ним.
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, 0, nullptr, false);
+    powerPrepareAssociation();
+    WiFi.reconnect();              // без связи это просто esp_wifi_connect()
     wifiConnecting   = true;
     wifiReady        = false;
     wifiConnectStart = millis();
@@ -419,7 +417,8 @@ static void wifiBeginConnect() {
 }
 
 // true — подключение больше не в процессе: либо связь есть, либо вышло время.
-// Промах не страшен: обычная проверка связи раз в 10 с сделает WiFi.reconnect().
+// Промах не страшен: дальше связь поднимает авто-реконнект ядра, а если и он
+// не справится — запасной WiFi.reconnect() из maintainNetwork().
 static bool wifiConnectStep(uint32_t now) {
     if (!wifiConnecting) return true;
 
@@ -447,15 +446,32 @@ static void maintainNetwork() {
     if (wifiConnecting) { wifiConnectStep(now); return; }
 
     if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
+        // Когда начался текущий обрыв (или случился наш последний reconnect);
+        // 0 — связь есть.
+        static uint32_t lostSince = 0;
         lastCheck = now;
         if (WiFi.status() != WL_CONNECTED) {
             wifiReady = false;
-            Serial.println("WiFi lost -> reconnect");
-            WiFi.reconnect();
-        } else if (!wifiReady) {
+            // Свой reconnect — только запасной путь. На обрыв первым отвечает
+            // авто-реконнект ядра, и раньше мы дёргали reconnect() поверх него
+            // каждые 10 с: esp_wifi_connect() посреди его ассоциации начинал
+            // её заново, и при слабом сигнале связь могла не встать никогда.
+            // Но ядро повторяет не всё — например, AUTH_FAIL после первого
+            // подключения оно не ретраит, — поэтому совсем без нас нельзя.
+            // Ждём столько же, сколько отводим на одну ассоциацию.
+            if (lostSince == 0) {
+                lostSince = now ? now : 1;
+                Serial.println("WiFi lost, auto-reconnect is on it");
+            } else if (now - lostSince >= WIFI_CONNECT_TIMEOUT_MS) {
+                lostSince = now ? now : 1;
+                Serial.println("WiFi still down -> reconnect");
+                WiFi.reconnect();
+            }
+        } else {
+            lostSince = 0;
             // Связь вернулась мимо автомата — авто-реконнектом стека или
             // предыдущим WiFi.reconnect(). Доводим её до конца тем же путём.
-            wifiOnConnected();
+            if (!wifiReady) wifiOnConnected();
         }
         String ip = WiFi.localIP().toString();
         if (ip != localIP) localIP = ip;
