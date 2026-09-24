@@ -29,11 +29,41 @@ inline bool originHostEquals(const char* a, const char* b) {
 // Хост сравнивается ЦЕЛИКОМ, а не по префиксу: иначе
 // "http://clock.local.evil.com" прошёл бы проверку.
 //
+// Есть ли host в списке имён через запятую ("clock.lan,clock.home").
+// Элементы сравниваются целиком, как и основное имя: "clock.lan.evil.com"
+// в списке с "clock.lan" не совпадает.
+inline bool originHostInList(const char* host, const char* list) {
+    if (!list) return false;
+    const size_t hostLen = strlen(host);
+    while (*list) {
+        const char* end = strchr(list, ',');
+        size_t n = end ? (size_t)(end - list) : strlen(list);
+        if (n == hostLen) {
+            size_t i = 0;
+            while (i < n && tolower((unsigned char)list[i]) ==
+                            tolower((unsigned char)host[i])) i++;
+            if (i == n) return true;
+        }
+        if (!end) break;
+        list = end + 1;
+    }
+    return false;
+}
+
 // deviceIp может быть пустым (сеть ещё не поднялась) — тогда сверяемся
 // только с mDNS-именем.
+//
+// extraHosts — имена, под которыми устройство знает роутер: он регистрирует
+// хост из DHCP со своим суффиксом (clock.lan у OpenWrt, clock.fritz.box,
+// clock.home). Без них открытый по такому имени дашборд грузился — GET не
+// проверяется, — но получал 403 на каждую команду и отказ в WebSocket, то
+// есть молча висел в «Offline». Принимать любой суффикс вместо списка нельзя:
+// "clock.<что угодно>" злоумышленник заведёт у себя и через DNS rebinding
+// направит на наш IP — Origin тогда совпадёт с его же доменом.
 inline bool originIsLocalDevice(const char* origin,
                                 const char* deviceIp,
-                                const char* deviceHostname) {
+                                const char* deviceHostname,
+                                const char* extraHosts = nullptr) {
     if (!origin || !*origin) return false;
 
     // Устройство отдаёт только http. Origin вида https://… — точно не наш,
@@ -62,5 +92,5 @@ inline bool originIsLocalDevice(const char* origin,
         int n = snprintf(mdns, sizeof(mdns), "%s.local", deviceHostname);
         if (n > 0 && n < (int)sizeof(mdns) && originHostEquals(buf, mdns)) return true;
     }
-    return false;
+    return originHostInList(buf, extraHosts);
 }

@@ -8,7 +8,7 @@
 ```bash
 pio run -e esp32c6            # сборка прошивки
 pio run -e esp32c6 -t upload  # прошить (порт обычно /dev/ttyACM0)
-pio test -e native            # 164 теста чистой логики, без железа
+pio test -e native            # 168 тестов чистой логики, без железа
 pio device monitor            # 115200, с декодером бэктрейсов
 ```
 

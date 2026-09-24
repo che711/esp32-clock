@@ -1097,6 +1097,28 @@ void test_origin_rejects_overlong_host() {
     TEST_ASSERT_FALSE(originIsLocalDevice(origin, IP, HOST));
 }
 
+// Имя, выданное роутером (clock.lan и т.п.), — только из явного списка
+static const char* EXTRA = "clock.lan,clock.home";
+
+void test_origin_extra_hosts_accepted() {
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://clock.lan",  IP, HOST, EXTRA));
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://clock.home", IP, HOST, EXTRA));
+    TEST_ASSERT_TRUE(originIsLocalDevice("http://CLOCK.LAN:80", IP, HOST, EXTRA));
+}
+
+void test_origin_extra_hosts_not_without_list() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.lan", IP, HOST));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.lan", IP, HOST, ""));
+}
+
+// Элементы списка сравниваются целиком — ни префиксом, ни суффиксом
+void test_origin_extra_hosts_whole_match() {
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.lan.evil.com", IP, HOST, EXTRA));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.la",           IP, HOST, EXTRA));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://clock.fritz.box",    IP, HOST, EXTRA));
+    TEST_ASSERT_FALSE(originIsLocalDevice("http://lan",                IP, HOST, EXTRA));
+}
+
 // ─── JSON ─────────────────────────────────────────────────
 void test_json_contains_time_key() {
     const char* json = "{\"time\":\"12:00:00\",\"date\":\"10 MAY 2026\"}";
@@ -1342,6 +1364,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_origin_rejects_other_port);
     RUN_TEST(test_origin_without_known_ip);
     RUN_TEST(test_origin_rejects_overlong_host);
+    RUN_TEST(test_origin_extra_hosts_accepted);
+    RUN_TEST(test_origin_extra_hosts_not_without_list);
+    RUN_TEST(test_origin_extra_hosts_whole_match);
 
     RUN_TEST(test_json_contains_time_key);
     RUN_TEST(test_json_contains_date_key);

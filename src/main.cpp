@@ -476,9 +476,13 @@ static void maintainNetwork() {
         String ip = WiFi.localIP().toString();
         if (ip != localIP) localIP = ip;
     }
-    uint32_t ntpEvery = timeSynced ? NTP_RESYNC_MS : NTP_RETRY_MS;
-    if (WiFi.status() == WL_CONNECTED && now - lastNtpMs >= ntpEvery) {
-        Serial.println(timeSynced ? "NTP resync" : "NTP retry");
+    // Только ретрай, пока часы не встали. Плановый ресинк раньше стоял здесь
+    // же, раз в 6 ч, но был пустым: демон SNTP и сам переспрашивает сервер
+    // каждые CONFIG_LWIP_SNTP_UPDATE_DELAY (3 ч в сборке ядра), а наш вызов
+    // лишь перезапускал его.
+    if (!timeSynced && WiFi.status() == WL_CONNECTED
+        && now - lastNtpMs >= NTP_RETRY_MS) {
+        Serial.println("NTP retry");
         startNTP();
     }
 }
@@ -544,6 +548,15 @@ static bool sensorDue(uint32_t nowMs) {
         return nowMs - lastSensorMs >= powerSensorIntervalMs();
     }
     if (t.tm_min == lastSensorMin) return false;   // в эту минуту уже мерили
+
+    // Время только что появилось — на старте из RTC или с первым ответом NTP.
+    // Последний замер был по millis() (или в setup()) секунды назад, и мерить
+    // прямо сейчас значило бы положить в историю дубль посреди минуты. Ждём
+    // начала ближайшей подходящей минуты, как и дальше.
+    if (lastSensorMin < 0) {
+        lastSensorMin = t.tm_min;
+        return false;
+    }
 
     // В экономе опрос раз в две минуты — берём чётные, чтобы момент замера
     // не зависел от того, когда устройство включили. Ноль в делителе тут
@@ -635,11 +648,17 @@ const char* resetReasonName() {
 // Штатное — это включили питание, нажали reset, перезагрузились по своей же
 // команде, проснулись из сна. Всё прочее авария, и дашборд поднимет её в
 // журнале до warn, вместо того чтобы утопить в потоке info.
+//
+// USB — тоже штатный: так C6 перезагружает хост через USB-Serial-JTAG, то есть
+// esptool после прошивки и монитор при открытии порта. Пока он числился
+// аварией, warn в журнале появлялся после каждой прошивки и приучал его не
+// читать.
 bool resetWasAbnormal() {
     switch (bootReason) {
         case ESP_RST_POWERON:
         case ESP_RST_EXT:
         case ESP_RST_SW:
+        case ESP_RST_USB:
         case ESP_RST_DEEPSLEEP: return false;
         default:                return true;
     }

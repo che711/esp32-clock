@@ -76,7 +76,8 @@ SensorData sensorRead() {
     data.pressureQnh  = pressureToQnh(p, t, HOME_ALTITUDE_M);
     data.airDensity   = airDensityOf(p, t);
 
-    history.maybePush(p, millis(), PRESSURE_HISTORY_INTERVAL_MS);
+    history.maybePush(p, millis(),
+                      PRESSURE_HISTORY_INTERVAL_MS - PRESSURE_HISTORY_SLACK_MS);
     data.pressureTrend = history.trendPerHour();
     data.forecastIcon  = forecastFromTrend(data.pressureTrend, history.count);
 
