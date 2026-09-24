@@ -53,7 +53,8 @@ static const char* WS_HEADERS[] = { "Origin" };
 static bool originAccepted() {
     String origin = server.header("Origin");
     if (origin.length() == 0) return true;
-    return originIsLocalDevice(origin.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
+    return originIsLocalDevice(origin.c_str(), localIP.c_str(), DEVICE_HOSTNAME,
+                               ORIGIN_EXTRA_HOSTS);
 }
 
 // Булев параметр запроса. Раньше на месте вызовов стояло `arg(...) != "0"`,
@@ -73,7 +74,8 @@ static void sendForeignOrigin() {
 // чужой Origin рукопожатие завалит.
 static bool wsValidateHeader(String headerName, String headerValue) {
     if (!headerName.equalsIgnoreCase("Origin")) return true;
-    return originIsLocalDevice(headerValue.c_str(), localIP.c_str(), DEVICE_HOSTNAME);
+    return originIsLocalDevice(headerValue.c_str(), localIP.c_str(), DEVICE_HOSTNAME,
+                               ORIGIN_EXTRA_HOSTS);
 }
 
 // Почему заряда нет. «Батареи нет» и «напряжение выше нормы» — разные беды:
