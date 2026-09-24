@@ -27,7 +27,8 @@
 **Сеть и интеграции**
 
 - Веб-дашборд с live-обновлением по WebSocket, светлая/тёмная тема, сворачиваемые блоки
-- REST API + WebSocket, доступ по `http://clock.local` (mDNS)
+- REST API + WebSocket, доступ по IPv4 — `http://<IP>`, адрес виден в нижней строке экрана.
+  mDNS (`clock.local`) убран: в сети он так и не заработал
 - MQTT + Home Assistant Discovery → отсюда же в **Apple Home** (см. ниже)
 - WS2812 статус-индикация, авто-реконнект Wi-Fi
 
@@ -186,7 +187,6 @@ CPU @ 80 MHz
 [Battery] АЦП на GPIO2, делитель 1:2.0
 Connecting to <SSID>....
 IP: 192.168.x.x
-mDNS: http://clock.local
 NTP sync. OK
 Power mode -> normal (auto)
 HTTP :80  WS :81
@@ -310,11 +310,11 @@ forced раз в одну-две минуты, а в forced-режиме фил�
 Пересчёт в обе стороны замкнут: записанное значение читается обратно тем же.
 
 ```bash
-curl --compressed http://clock.local/
-curl http://clock.local/api/stats
-curl -X POST http://clock.local/api/brightness -d "value=80"
-curl -X POST http://clock.local/api/power -d "on=0"
-curl -X POST http://clock.local/api/powermode -d "mode=eco"
+curl --compressed http://<IP>/
+curl http://<IP>/api/stats
+curl -X POST http://<IP>/api/brightness -d "value=80"
+curl -X POST http://<IP>/api/power -d "on=0"
+curl -X POST http://<IP>/api/powermode -d "mode=eco"
 ```
 
 Дашборд отдаётся предсжатым (`Content-Encoding: gzip`), поэтому для `curl`
@@ -331,11 +331,10 @@ curl -X POST http://clock.local/api/powermode -d "mode=eco"
 
 `Origin` проставляет сам браузер, и подделать его со страницы нельзя:
 
-- свой дашборд (`http://clock.local`, `http://<IP>`, с портом `:80` или без) — пропускается;
-- имена, которые раздаёт роутер (`clock.lan`, `clock.home`), — тоже, но только из
-  явного списка `ORIGIN_EXTRA_HOSTS` в `config.h`. Любой суффикс принимать нельзя:
-  чужой домен `clock.<что-угодно>` через DNS rebinding указал бы на наш IP.
-  Имена из публичных зон (`clock.fritz.box`) добавляются в `secrets.h` осознанно;
+- свой дашборд — только `http://<IP>`, с портом `:80` или без — пропускается;
+- любое имя вместо IP, включая прежний `clock.local`, — чужое: mDNS из прошивки
+  убран, и имя, которое устройство не объявляет, в `Origin` может прийти только
+  от чужого DNS (DNS rebinding);
 - чужой домен, `https://`, `null` из песочницы — `403 {"error":"foreign origin"}`,
   для WebSocket отказ в рукопожатии;
 - **запрос без `Origin` пропускается** — его шлют `curl`, Home Assistant и любые
@@ -343,7 +342,7 @@ curl -X POST http://clock.local/api/powermode -d "mode=eco"
   поэтому примеры выше и интеграции продолжают работать без изменений.
 
 Логика сравнения — в `src/origin_check.h`, покрыта тестами (в том числе на
-`http://clock.local.evil.com`, который прошёл бы при сравнении по префиксу).
+`http://192.168.1.42.evil.com`, который прошёл бы при сравнении по префиксу).
 
 ### WebSocket `ws://<IP>:81`
 

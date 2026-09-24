@@ -635,7 +635,7 @@
   <div class="app-header">
     <div class="app-title">ESP32 <b>CLOCK</b></div>
     <div class="header-side">
-      <div class="host-chip" id="host-chip">clock.local</div>
+      <div class="host-chip" id="host-chip">—</div>
       <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
     </div>
   </div>
@@ -972,7 +972,7 @@
     if (lastD) render(lastD);
   }
 
-  document.getElementById('host-chip').textContent = location.hostname || 'clock.local';
+  document.getElementById('host-chip').textContent = location.hostname || '—';
 
   // ── Сворачивание блоков ──────────────────────────────
   function toggleCard(id) {
