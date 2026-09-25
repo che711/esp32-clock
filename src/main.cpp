@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <ESPmDNS.h>
 #include <time.h>
 #include "config.h"
 #include "app.h"
@@ -360,7 +359,7 @@ static uint32_t wifiDotMs        = 0;   // ритм точек в логе, ра
 // Отработала ли wifiOnConnected() для текущей ассоциации. Связь поднимается не
 // только через автомат: setAutoReconnect(true) и WiFi.reconnect() возвращают её
 // сами, мимо него. Без этого признака после такого возврата не было бы ни
-// mDNS, ни настроек радио под профиль — то есть clock.local молчал бы до ребута.
+// нового localIP, ни настроек радио под профиль.
 static bool     wifiReady        = false;
 
 // Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
@@ -383,13 +382,9 @@ static void wifiOnConnected() {
     // Arduino сбрасывает сон на MIN_MODEM, так что без этого вызова радио
     // после переподключения работало бы не в своей глубине.
     powerApplyRadio();
-    // end() перед begin(): сюда заходят и повторно — после возврата из
-    // выживания, где радио выключалось вместе с ответчиком mDNS.
-    MDNS.end();
-    if (MDNS.begin(DEVICE_HOSTNAME)) {
-        MDNS.addService("http", "tcp", 80);
-        Serial.printf("mDNS: http://%s.local\n", DEVICE_HOSTNAME);
-    }
+    // mDNS (clock.local) здесь больше не поднимается: в сети он так и не
+    // заработал, а раз часы открывают только по IP, то и адрес ответчика
+    // незачем. IP виден в нижней строке экрана.
     // Время — сразу, как появилась связь. SNTP запущен ещё в setup(), но без
     // сети его запрос ушёл в никуда, а повтора ждать долго: наш в
     // maintainNetwork() случится только через NTP_RETRY_MS, и всё это время на
@@ -401,7 +396,6 @@ static void wifiOnConnected() {
 static void wifiBeginConnect() {
     Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(DEVICE_HOSTNAME);
     WiFi.setAutoReconnect(true);
     // begin() без подключения: он переписывает конфиг STA целиком, и
     // listen_interval надо вписать после него, но до ассоциации —

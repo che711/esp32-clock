@@ -36,22 +36,6 @@
 #define WIFI_PASSWORD   "password"
 #endif
 
-// Hostname (mDNS: http://clock.local)
-#define DEVICE_HOSTNAME "clock"
-
-// Ещё имена, под которыми дашборд вправе слать команды (Origin), через
-// запятую. IP, "clock" и "clock.local" принимаются и без них. Нужны, когда
-// часы открывают по имени, которое раздаёт роутер: он регистрирует хост из
-// DHCP со своим суффиксом, и без этого списка такая вкладка получала 403 на
-// всё и не могла открыть WebSocket (подробно — в origin_check.h).
-//
-// По умолчанию — только .lan (OpenWrt) и .home: оба домена в публичном DNS не
-// делегированы, завести их у себя злоумышленник не может. Имена из настоящих
-// зон (clock.fritz.box — .box публичный) вписывать осознанно, в secrets.h.
-#ifndef ORIGIN_EXTRA_HOSTS
-#define ORIGIN_EXTRA_HOSTS DEVICE_HOSTNAME ".lan," DEVICE_HOSTNAME ".home"
-#endif
-
 // ── Время / часовой пояс ────────────────────────────────────
 #define NTP_SERVER      "pool.ntp.org"
 // POSIX-TZ (авто-переход зима/лето). Варшава/Центральная Европа.

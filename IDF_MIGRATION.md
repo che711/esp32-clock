@@ -76,8 +76,9 @@ light sleep нужен раньше, чем закончится переезд,
 3. **`web_api.cpp` — самый крупный кусок**, начинать с него: станет видно
    цену остального. `WebServer` → `esp_http_server`, links2004/WebSockets →
    встроенный в него WebSocket. Снимок JSON собирается тем же `snprintf`.
-4. **Сеть в `main.cpp`:** `WiFi.h` → `esp_wifi` + `esp_netif`, `ESPmDNS` →
-   компонент `mdns`, `configTzTime` → `esp_netif_sntp`.
+4. **Сеть в `main.cpp`:** `WiFi.h` → `esp_wifi` + `esp_netif`,
+   `configTzTime` → `esp_netif_sntp`. mDNS не переносится: из прошивки он
+   убран, доступ только по IPv4.
 5. **Драйверы:** BMP280 (свой на `i2c_master`, ~150 строк, или компонент из
    реестра), АЦП батареи → `adc_oneshot` + `adc_cali`, WS2812 → `led_strip`,
    U8g2 → HAL-порт под IDF.
@@ -93,7 +94,7 @@ light sleep нужен раньше, чем закончится переезд,
 
 | Сейчас | В IDF |
 | --- | --- |
-| `WiFi.h`, `ESPmDNS` | `esp_wifi` + `esp_netif` + компонент `mdns` |
+| `WiFi.h` | `esp_wifi` + `esp_netif` |
 | `WebServer` | `esp_http_server` |
 | links2004/WebSockets | WebSocket внутри `esp_http_server` |
 | PubSubClient | `esp-mqtt` (`mqtt_client.h`) |
