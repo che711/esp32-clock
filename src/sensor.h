@@ -21,5 +21,7 @@ struct SensorData {
 };
 
 bool       sensorInit();
-SensorData sensorRead();
+// tempOffsetC прибавляется к температуре до производных. Решает её main.cpp:
+// датчику незачем знать, горит ли панель.
+SensorData sensorRead(float tempOffsetC);
 

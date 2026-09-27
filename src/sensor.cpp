@@ -44,7 +44,7 @@ bool sensorInit() {
     return true;
 }
 
-SensorData sensorRead() {
+SensorData sensorRead(float tempOffsetC) {
     SensorData data{};
 
     if (!bmpInitialized) {
@@ -58,7 +58,11 @@ SensorData sensorRead() {
         return data;
     }
 
-    float t = bmp.readTemperature();
+    // Поправку вносим до QNH и плотности: они считаются от температуры
+    // воздуха, а не подогретого корпуса. Давление она не трогает —
+    // компенсацию библиотека ведёт от t_fine, температуры самого кристалла,
+    // по которой датчик калибровали на заводе.
+    float t = bmp.readTemperature() + tempOffsetC;
     float p = bmp.readPressure() / 100.0f;
 
     if (!weatherPlausible(t, p)) {
