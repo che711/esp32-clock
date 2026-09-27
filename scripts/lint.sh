@@ -21,8 +21,9 @@ fi
 # Проверяем весь src/, а не пару файлов: раньше main.cpp, sensor.cpp,
 # battery.cpp и mqtt.cpp не смотрел никто.
 #
-# cstyleCast — по всему Arduino-API (payload у WebSockets это uint8_t*,
-# приведения к char* неизбежны), поэтому подавлен осознанно.
+# cstyleCast — по всему Arduino- и IDF-API (payload кадра WebSocket в
+# esp_http_server — uint8_t*, приведения к char* и обратно неизбежны),
+# поэтому подавлен осознанно.
 #
 # knownConditionTrueFalse на файле тестов — шум по устройству дела: тест
 # сверяет заранее известный ответ чистой функции, и анализатор каждый раз
