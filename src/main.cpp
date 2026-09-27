@@ -28,6 +28,12 @@ char   dayFullBuf[12];
 bool   timeSynced = false;
 String localIP    = "";
 
+// Замок состояния (app.h). Создаётся первым делом в setup() — до того, как
+// поднимется веб-сервер, которому он нужен.
+static SemaphoreHandle_t appMutex = nullptr;
+void appLock()   { xSemaphoreTake(appMutex, portMAX_DELAY); }
+void appUnlock() { xSemaphoreGive(appMutex); }
+
 // Поправка на тепло панели (BMP280_SCREEN_HEAT_C в config.h). Берётся по
 // состоянию экрана в момент замера. HAS_DISPLAY проверяется отдельно: без
 // подпаянной панели displayIsOn() всё равно отвечает «горит», а греть
@@ -681,6 +687,11 @@ static void bootSplash() {
 
 // ─────────────────────────────────────────────────────────
 void setup() {
+    // Весь setup() — под замком: обработчики веб-сервера ждут, пока старт
+    // не закончится, и не видят недособранного состояния.
+    appMutex = xSemaphoreCreateMutex();
+    appLock();
+
     Serial.begin(115200);
 #if ARDUINO_USB_CDC_ON_BOOT
     // Без этого write() в USB-CDC блокирует loop() на секунды,
@@ -786,9 +797,12 @@ void setup() {
     // синий первым же оборотом. Раньше его не снимал никто, и гас он только
     // на первом опросе датчика — через минуту-две, когда дашборд давно отвечал.
     ledColor(0, 0, 0);
+
+    appUnlock();
 }
 
 void loop() {
+    appLock();
     webApiLoop();
     batteryLoop();            // копит отсчёты АЦП по одному, без задержек
     checkBatteryEmpty();      // ноль шкалы -> deep sleep, дальше не возвращаемся
@@ -841,7 +855,9 @@ void loop() {
                       powerModeName());
     }
 
-    // Короткий цикл на ходу: иначе команда стоит в очереди до конца паузы
-    // и устройство стартует заметно позже браузера.
-    delay(stopwatch.running() ? LOOP_STOPWATCH_MS : LOOP_IDLE_MS);
+    // Пауза — окно для обработчиков веб-сервера: замок отпущен только на неё.
+    // Короткий цикл на ходу: кадр секундомера рисуется чаще.
+    const uint32_t pauseMs = stopwatch.running() ? LOOP_STOPWATCH_MS : LOOP_IDLE_MS;
+    appUnlock();
+    delay(pauseMs);
 }
