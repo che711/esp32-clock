@@ -6,7 +6,7 @@
 #include "clock_utils.h"
 #include "battery_calc.h"
 #include "origin_check.h"
-#include <WiFi.h>
+#include "net.h"
 #include <esp_http_server.h>
 #include <algorithm>
 #include <atomic>
@@ -86,6 +86,15 @@ static bool originAccepted(httpd_req_t* req) {
     if (r == ESP_ERR_NOT_FOUND) return true;
     if (r != ESP_OK)            return false;
     return originIsLocalDevice(origin, localIP.c_str());
+}
+
+// Та же проверка, но замок берёт сама и сразу отпускает. Для изменяющих ручек:
+// отказ (403, 400) они отправляют уже без замка. Раньше отказы уходили прямо
+// из-под него — против правила из шапки файла: отправка ждёт сеть, а loop()
+// всё это время стоит.
+static bool originAcceptedLocked(httpd_req_t* req) {
+    AppGuard lock;
+    return originAccepted(req);
 }
 
 // Булев параметр запроса. Раньше на месте вызовов стояло `arg(...) != "0"`,
@@ -241,7 +250,7 @@ static void buildJson(char* buf, size_t sz) {
         timeBuf, dateBuf, dayFullBuf,
         uptimeBuf,
         ssidJson, localIP.c_str(),
-        (int)WiFi.RSSI(),
+        netRssi(),
         (float)dieTempC(),
         wsCount.load(),
         (unsigned long)esp_get_free_heap_size(),
@@ -347,7 +356,7 @@ static esp_err_t handleRoot(httpd_req_t* req) {
     // no-cache здесь не значит «не кешируй»: копию держать можно, но перед
     // показом обязательно спросить. Спрашивает браузер через ETag, а тот
     // считается из содержимого страницы при сборке (gen_web_ui.py). Совпал —
-    // отвечаем 304 и не гоняем 30 КБ; не совпал — страница поменялась, и
+    // отвечаем 304 и не гоняем страницу заново; не совпал — она поменялась, и
     // отдать надо новую.
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     httpd_resp_set_hdr(req, "ETag", INDEX_HTML_ETAG);
@@ -360,7 +369,10 @@ static esp_err_t handleRoot(httpd_req_t* req) {
     }
 
     // Страница лежит во флеше уже сжатой — распаковывает её браузер.
-    // 114 КБ → 30 КБ и по сети, и во флеше.
+    // Комментарии из исходника вырезаются ещё при сборке (gen_web_ui.py),
+    // поэтому уходит около 23 КБ вместо 130 КБ; точные цифры — в шапке
+    // сгенерированного web_ui_gz.h. Здесь их больше не держим: прежние
+    // «114 → 30» отстали от страницы на первой же крупной правке.
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     return httpd_resp_send(req, (const char*)INDEX_HTML_GZ, INDEX_HTML_GZ_LEN);
@@ -469,7 +481,7 @@ static esp_err_t handleApiHistory(httpd_req_t* req) {
 
     // Кольцо копируется под замком, а размечается и уходит без него. Отправка
     // ~12 КБ в экономе ждёт подтверждений браузера до полсекунды на кусок, и
-    // держать замок всё это время значило бы остановить loop(). Копия — 8.6 КБ
+    // держать замок всё это время значило бы остановить loop(). Копия — 7.2 КБ
     // в куче на время ответа.
     TrendHistory* snap = new (std::nothrow) TrendHistory;
     if (!snap) return httpd_resp_send_500(req);
@@ -525,43 +537,49 @@ static esp_err_t handleApiHistory(httpd_req_t* req) {
 static esp_err_t handleApiBrightness(httpd_req_t* req) {
     requestCount++;
     ReqArgs args(req);
-    char resp[64];
-    {
-        AppGuard lock;
-        if (!originAccepted(req)) return sendForeignOrigin(req);
-        char val[8];
-        if (args.get("auto", val, sizeof(val)) && argIsTrue(val)) {
-            displaySetAuto();
-            applyAutoBrightness();       // сразу применяем авто-уровень
-            webApiBroadcast();
-            snprintf(resp, sizeof(resp), "{\"ok\":true,\"mode\":\"auto\"}");
-        } else if (args.get("value", val, sizeof(val))) {
-            int pct = atoi(val);
-            if (pct < 0)   pct = 0;
-            if (pct > 100) pct = 100;
-            displaySetManualPct(pct);
-            webApiBroadcast();
-            snprintf(resp, sizeof(resp),
-                     "{\"ok\":true,\"mode\":\"manual\",\"pct\":%d}", pct);
-        } else {
+    if (!originAcceptedLocked(req)) return sendForeignOrigin(req);
+
+    char val[8];
+    const bool toAuto = args.get("auto", val, sizeof(val)) && argIsTrue(val);
+    int pct = 0;
+    if (!toAuto) {
+        if (!args.get("value", val, sizeof(val)))
             return sendJson(req, "400 Bad Request",
                             "{\"error\":\"missing value or auto\"}");
-        }
+        pct = atoi(val);
+        if (pct < 0)   pct = 0;
+        if (pct > 100) pct = 100;
     }
+
+    {
+        AppGuard lock;
+        if (toAuto) {
+            displaySetAuto();
+            applyAutoBrightness();       // сразу применяем авто-уровень
+        } else {
+            displaySetManualPct(pct);
+        }
+        webApiBroadcast();
+    }
+
+    char resp[64];
+    if (toAuto) snprintf(resp, sizeof(resp), "{\"ok\":true,\"mode\":\"auto\"}");
+    else        snprintf(resp, sizeof(resp),
+                         "{\"ok\":true,\"mode\":\"manual\",\"pct\":%d}", pct);
     return sendJson(req, "200 OK", resp);
 }
 
 static esp_err_t handleApiPower(httpd_req_t* req) {
     requestCount++;
     ReqArgs args(req);
+    if (!originAcceptedLocked(req)) return sendForeignOrigin(req);
+    char val[8];
+    if (!args.get("on", val, sizeof(val)))
+        return sendJson(req, "400 Bad Request", "{\"error\":\"missing on param\"}");
+
     char resp[96];
     {
         AppGuard lock;
-        if (!originAccepted(req)) return sendForeignOrigin(req);
-        char val[8];
-        if (!args.get("on", val, sizeof(val)))
-            return sendJson(req, "400 Bad Request", "{\"error\":\"missing on param\"}");
-
         // не displaySetPower: ночью включаем с таймером
         const char* refused = screenSetPower(argIsTrue(val));
         // Отдаём фактическое состояние панели, а не запрошенное: включение
@@ -581,16 +599,17 @@ static esp_err_t handleApiPower(httpd_req_t* req) {
 static esp_err_t handleApiPowerMode(httpd_req_t* req) {
     requestCount++;
     ReqArgs args(req);
+    if (!originAcceptedLocked(req)) return sendForeignOrigin(req);
+    char name[16];
+    if (!args.get("mode", name, sizeof(name)))
+        return sendJson(req, "400 Bad Request", "{\"error\":\"missing mode\"}");
+    PowerMode m;
+    if (!powerModeFromName(name, &m))
+        return sendJson(req, "400 Bad Request", "{\"error\":\"bad mode\"}");
+
     char resp[144];
     {
         AppGuard lock;
-        if (!originAccepted(req)) return sendForeignOrigin(req);
-        char name[16];
-        if (!args.get("mode", name, sizeof(name)))
-            return sendJson(req, "400 Bad Request", "{\"error\":\"missing mode\"}");
-        PowerMode m;
-        if (!powerModeFromName(name, &m))
-            return sendJson(req, "400 Bad Request", "{\"error\":\"bad mode\"}");
         powerSetMode(m);
 
         // mode — что работает сейчас, chosen — что выбрано. Расходятся они на
@@ -608,12 +627,7 @@ static esp_err_t handleApiPowerMode(httpd_req_t* req) {
 
 static esp_err_t handleReboot(httpd_req_t* req) {
     requestCount++;
-    bool accepted;
-    {
-        AppGuard lock;
-        accepted = originAccepted(req);
-    }
-    if (!accepted) return sendForeignOrigin(req);
+    if (!originAcceptedLocked(req)) return sendForeignOrigin(req);
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, "Rebooting...");
     delay(300);

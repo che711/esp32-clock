@@ -13,15 +13,11 @@ static bool bmpInitialized = false;
 // Кольцевой буфер для тренда давления (логика — в weather_calc.h)
 static PressureHistory history;
 
-bool sensorInit() {
-    Wire.begin(BMP280_SDA_PIN, BMP280_SCL_PIN);
-
-    if (!bmp.begin(BMP280_I2C_ADDR)) {
-        Serial.println("[BMP280] Устройство не найдено!");
-        Serial.printf("[BMP280] Ожидаемый адрес: 0x%02X\n", BMP280_I2C_ADDR);
-        bmpInitialized = false;
-        return false;
-    }
+// Поиск датчика и настройка. Молча: говорить, нашёлся ли он, — дело
+// вызывающих, у первого старта и у повторной попытки слова разные.
+static bool bmpBegin() {
+    Wire.begin(BMP280_SDA_PIN, BMP280_SCL_PIN);   // повторный вызов безвреден
+    if (!bmp.begin(BMP280_I2C_ADDR)) return false;
 
     // Профиль «weather monitoring» из даташита Bosch: forced, ×1/×1, без
     // фильтра. Раньше стояли ×2/×16 и IIR ×4. Фильтр в forced-режиме хранит
@@ -38,8 +34,16 @@ bool sensorInit() {
         Adafruit_BMP280::FILTER_OFF,
         Adafruit_BMP280::STANDBY_MS_1
     );
+    return true;
+}
 
-    bmpInitialized = true;
+bool sensorInit() {
+    bmpInitialized = bmpBegin();
+    if (!bmpInitialized) {
+        Serial.println("[BMP280] Устройство не найдено!");
+        Serial.printf("[BMP280] Ожидаемый адрес: 0x%02X\n", BMP280_I2C_ADDR);
+        return false;
+    }
     Serial.println("[BMP280] Инициализация успешна.");
     return true;
 }
@@ -47,13 +51,27 @@ bool sensorInit() {
 SensorData sensorRead(float tempOffsetC) {
     SensorData data{};
 
+    // Датчика нет — ищем его заново на каждом плановом замере. Раньше
+    // bmpInitialized ставился один раз в setup(), и датчик, не ответивший на
+    // старте (контакт, питание модуля поднялось позже) или отвалившийся на
+    // ходу, пропадал до перезагрузки: «no sensor» на экране при исправном
+    // BMP280. Попытка стоит одну транзакцию I²C раз в минуту-две, а дашборд
+    // возврат уже умеет показать («BMP280 sensor online»).
     if (!bmpInitialized) {
-        data.valid = false;
-        return data;
+        bmpInitialized = bmpBegin();
+        if (!bmpInitialized) {
+            data.valid = false;
+            return data;
+        }
+        Serial.println("[BMP280] Датчик снова на связи.");
     }
 
+    // Сбой замера — повод начать с поиска: датчик, переживший провал питания,
+    // встаёт со сброшенными регистрами, и bmp.begin() заново читает и его
+    // калибровку. Следующий плановый замер так и сделает.
     if (!bmp.takeForcedMeasurement()) {
         data.valid = false;
+        bmpInitialized = false;
         Serial.println("[BMP280] Измерение не завершилось!");
         return data;
     }
@@ -65,8 +83,11 @@ SensorData sensorRead(float tempOffsetC) {
     float t = bmp.readTemperature() + tempOffsetC;
     float p = bmp.readPressure() / 100.0f;
 
+    // Мусор вместо чисел — тот же случай: отвалившийся датчик отвечает
+    // единицами на шине, и из них выходит давление вне всякого диапазона.
     if (!weatherPlausible(t, p)) {
         data.valid = false;
+        bmpInitialized = false;
         Serial.println("[BMP280] Некорректные данные!");
         return data;
     }

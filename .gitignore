@@ -1,6 +1,15 @@
 .pio
 # Wi-Fi: локальный файл с логином и паролем, подхватывается src/config.h
 src/secrets.h
+# Гибридная сборка pioarduino (custom_sdkconfig в platformio.ini) пишет это
+# в корень проекта при каждой пересборке библиотек ядра. CMakeLists.txt здесь
+# тоже её, а не наш: при переезде на IDF (IDF_MIGRATION.md) строку убрать.
+/.dummy/
+/CMakeLists.txt
+/dependencies.lock
+/managed_components/
+/sdkconfig.defaults
+/sdkconfig.esp32c6
 .claude/settings.local.json
 .vscode/
 .vscode/.browse.c_cpp.db*

@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_pm.h>
+#include <driver/gpio.h>
 
 // ============================================================
 //  power.cpp — состояние уровня и его применение к железу.
@@ -102,6 +104,42 @@ static void applyProfile() {
 
 void powerBegin() {
     applyProfile();
+}
+
+// Процессор с радио — самая крупная статья расхода, 60–80 мА (CLAUDE.md,
+// «Электрика»), и всё потому, что он не спит вовсе: loop() ждёт свою паузу
+// на полном ходу. Light sleep усыпляет его в каждой такой паузе, радио при
+// этом просыпается к маячкам само (modem sleep, powerApplyRadio).
+void powerEnableLightSleep() {
+#if CONFIG_PM_ENABLE
+    // Ноги, которые обязаны держать уровень и во сне. ESP_SLEEP_GPIO_RESET_
+    // WORKAROUND в сборке ядра включён, а вместе с tickless он включает и
+    // PM_SLP_DISABLE_GPIO: на время каждого light sleep все GPIO изолируются —
+    // ни выхода, ни подтяжек. Свободным ногам это на пользу (сотни мкА), а
+    // этим — провода в воздухе: CS и RST панели ловили бы помехи (сброс или
+    // мусор в памяти кадра), линия WS2812 — ложные биты, I²C без подтяжек —
+    // ложный старт. Остальные, включая АЦП на GPIO2, пусть изолируются.
+    static const int KEEP_AWAKE_PINS[] = {
+#if HAS_DISPLAY
+        OLED_CLK_PIN, OLED_DIN_PIN, OLED_DC_PIN, OLED_RST_PIN, OLED_CS_PIN,
+#endif
+        BMP280_SDA_PIN, BMP280_SCL_PIN, LED_PIN,
+    };
+    for (int pin : KEEP_AWAKE_PINS) gpio_sleep_sel_dis((gpio_num_t)pin);
+
+    // Частота в обе стороны одна — та, что выставил setup(). Смену частоты на
+    // ходу (DFS) не включаем: выигрыш от неё — только в короткие промежутки
+    // бодрствования, а SPI панели (U8g2 через Arduino SPI) ходит мимо драйвера
+    // IDF и PM-замков не берёт, так что переживёт ли он смену частоты посреди
+    // кадра, пришлось бы проверять отдельно. Сон — отдельная статья, и ради
+    // него всё и затевалось.
+    esp_pm_config_t pm = {};
+    pm.max_freq_mhz       = (int)getCpuFrequencyMhz();
+    pm.min_freq_mhz       = pm.max_freq_mhz;
+    pm.light_sleep_enable = true;
+    esp_err_t err = esp_pm_configure(&pm);
+    Serial.printf("PM: light sleep %s\n", err == ESP_OK ? "on" : esp_err_to_name(err));
+#endif
 }
 
 void powerLoop() {

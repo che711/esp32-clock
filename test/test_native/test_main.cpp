@@ -9,6 +9,8 @@
 #include "../../src/history.h"
 #include "../../src/stopwatch.h"
 #include "../../src/origin_check.h"
+#include "../../src/schedule_calc.h"
+#include "../../src/screen_calc.h"
 
 // ─── Uptime ───────────────────────────────────────────────
 void test_uptime_seconds_only() {
@@ -835,6 +837,266 @@ void test_power_mode_from_name_rejects_removed_survival() {
     TEST_ASSERT_EQUAL(POWER_ECO, m);
 }
 
+// ─── Расписание экрана ────────────────────────────────────
+// Окно закрылось — горящую панель гасим
+void test_screen_window_close_turns_panel_off() {
+    ScreenSchedule sc;
+    ScreenStep st = sc.tick(1000, true, false, true);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, st.action);
+    TEST_ASSERT_FALSE(st.peekExpired);
+}
+
+// На старте фронта нет: панель, погашенную до первого шага, окно само не
+// зажигает — иначе любая перезагрузка днём отменяла бы ручное выключение
+void test_screen_no_edge_on_first_step() {
+    ScreenSchedule sc;
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(1000, true, true, false).action);
+}
+
+// Открытие окна зажигает панель один раз, на самом фронте, а не на каждом
+// шаге: иначе выключение кнопкой днём отменялось бы через секунду
+void test_screen_window_open_turns_on_once() {
+    ScreenSchedule sc;
+    sc.tick(1000, true, false, false);                                  // ночь
+    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, sc.tick(2000, true, true, false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP,    sc.tick(3000, true, true, false).action);
+}
+
+// Тот самый случай, ради которого помнится граница окна, а не панель:
+// выключили кнопкой днём — утром экран обязан загореться сам
+void test_screen_manual_off_by_day_returns_next_morning() {
+    ScreenSchedule sc;
+    sc.tick(1000, true, true, true);                    // день, панель горит
+    sc.requestOff();                                    // погасили из дашборда
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(2000, true, true,  false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(3000, true, false, false).action);  // 22:00
+    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, sc.tick(4000, true, true, false).action); // 6:00
+}
+
+// Ночное «посмотреть на часы»: панель держится подсветку и гаснет сама,
+// с отметкой для журнала
+void test_screen_peek_holds_then_expires() {
+    ScreenSchedule sc;
+    sc.tick(1000, true, false, false);
+    TEST_ASSERT_EQUAL(SCREEN_REFUSED_NONE, sc.requestOn(1000, true, false, true, 30000));
+    TEST_ASSERT_TRUE(sc.peeking());
+
+    ScreenStep st = sc.tick(20000, true, false, true);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, st.action);
+    TEST_ASSERT_FALSE(st.peekExpired);
+
+    st = sc.tick(31000, true, false, true);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, st.action);
+    TEST_ASSERT_TRUE(st.peekExpired);
+    TEST_ASSERT_FALSE(sc.peeking());
+}
+
+// Подсветка перебивает только расписание: на исходе банки панель гаснет
+// и посреди неё, иначе полминуты OLED роняли бы устройство в brownout
+void test_screen_peek_does_not_beat_battery() {
+    ScreenSchedule sc;
+    sc.tick(1000, true, false, false);
+    sc.requestOn(1000, true, false, true, 30000);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, sc.tick(2000, false, false, true).action);
+}
+
+// Подсветка съедала фронт окна: если ночью смотрели на часы, утро для
+// экрана не наступало. Фронт считается до выхода по подсветке
+void test_screen_morning_after_night_peek() {
+    ScreenSchedule sc;
+    sc.tick(1000, true, false, false);                  // ночь, панель тёмная
+    sc.requestOn(2000, true, false, true, 30000);
+    sc.tick(3000, true, false, true);                   // идёт подсветка
+    sc.tick(40000, true, false, true);                  // истекла, погасили
+    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, sc.tick(50000, true, true, false).action);
+}
+
+// Час стал рабочим — отсчёт подсветки снимается, иначе дашборд обещал бы
+// гашение экрана, которое не случится
+void test_screen_window_open_clears_peek() {
+    ScreenSchedule sc;
+    sc.tick(1000, true, false, false);
+    sc.requestOn(1000, true, false, true, 30000);
+    sc.tick(2000, true, true, true);
+    TEST_ASSERT_FALSE(sc.peeking());
+    TEST_ASSERT_EQUAL_UINT32(0, sc.peekLeftS(2000));
+}
+
+// Рубеж по заряду командой не обходится, и начатую подсветку отказ снимает
+void test_screen_request_refused_on_battery() {
+    ScreenSchedule sc;
+    sc.requestOn(1000, true, false, true, 30000);
+    TEST_ASSERT_EQUAL(SCREEN_REFUSED_BATTERY, sc.requestOn(2000, false, false, true, 30000));
+    TEST_ASSERT_FALSE(sc.peeking());
+}
+
+// Яркость в нуле — отказ со своей причиной, а не молчаливый подъём уровня
+void test_screen_request_refused_at_zero_brightness() {
+    ScreenSchedule sc;
+    TEST_ASSERT_EQUAL(SCREEN_REFUSED_BRIGHTNESS, sc.requestOn(1000, true, true, true, 30000));
+    TEST_ASSERT_FALSE(sc.peeking());
+}
+
+// Днём «включить» — просто включить: гасить по таймеру незачем
+void test_screen_request_by_day_starts_no_peek() {
+    ScreenSchedule sc;
+    TEST_ASSERT_EQUAL(SCREEN_REFUSED_NONE, sc.requestOn(1000, true, false, false, 30000));
+    TEST_ASSERT_FALSE(sc.peeking());
+}
+
+// Обратный отсчёт — вверх до целых секунд: «0 с» при горящей панели
+// читалось бы как сбой
+void test_screen_peek_left_rounds_up() {
+    ScreenSchedule sc;
+    sc.requestOn(1000, true, false, true, 30000);
+    TEST_ASSERT_EQUAL_UINT32(30, sc.peekLeftS(1000));
+    TEST_ASSERT_EQUAL_UINT32(30, sc.peekLeftS(1001));
+    TEST_ASSERT_EQUAL_UINT32(1,  sc.peekLeftS(30999));
+    TEST_ASSERT_EQUAL_UINT32(0,  sc.peekLeftS(31000));
+}
+
+// Подсветка, начатая за секунды до переполнения millis() (49-й день),
+// не должна ни погаснуть сразу, ни гореть вечно
+void test_screen_peek_survives_millis_overflow() {
+    ScreenSchedule sc;
+    const uint32_t t0 = 0xFFFFF000UL;
+    sc.tick(t0, true, false, false);
+    sc.requestOn(t0, true, false, true, 30000);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(t0 + 10000UL, true, false, true).action);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, sc.tick(t0 + 31000UL, true, false, true).action);
+}
+
+// Конец подсветки, выпавший ровно на 0, не должен читаться как «подсветки нет»
+void test_screen_peek_end_never_zero() {
+    ScreenSchedule sc;
+    sc.requestOn(0UL - 30000UL, true, false, true, 30000);
+    TEST_ASSERT_TRUE(sc.peeking());
+}
+
+// ─── Таймеры цикла ────────────────────────────────────────
+// Удержание: действуем, только когда условие продержалось весь срок
+void test_hold_needs_full_duration() {
+    HoldTimer h;
+    TEST_ASSERT_EQUAL(HoldTimer::STARTED, h.step(true, 1000,  30000));
+    TEST_ASSERT_EQUAL(HoldTimer::NONE,    h.step(true, 20000, 30000));
+    TEST_ASSERT_EQUAL(HoldTimer::ELAPSED, h.step(true, 31000, 30000));
+}
+
+// Пропало посреди срока — отсчёт заново, а не с того же места: одиночный
+// выброс АЦП не должен копиться к чужому нулю
+void test_hold_resets_when_condition_drops() {
+    HoldTimer h;
+    h.step(true, 1000, 30000);
+    TEST_ASSERT_EQUAL(HoldTimer::NONE,    h.step(false, 20000, 30000));
+    TEST_ASSERT_EQUAL(HoldTimer::STARTED, h.step(true,  25000, 30000));
+    TEST_ASSERT_EQUAL(HoldTimer::NONE,    h.step(true,  50000, 30000));
+    TEST_ASSERT_EQUAL(HoldTimer::ELAPSED, h.step(true,  55000, 30000));
+}
+
+// После срабатывания отсчёт идёт заново: reconnect() повторяется раз в срок,
+// пока связь не вернётся, а не на каждой проверке подряд
+void test_hold_repeats_after_elapsed() {
+    HoldTimer h;
+    h.step(true, 1000, 15000);
+    TEST_ASSERT_EQUAL(HoldTimer::ELAPSED, h.step(true, 16000, 15000));
+    TEST_ASSERT_EQUAL(HoldTimer::NONE,    h.step(true, 26000, 15000));
+    TEST_ASSERT_EQUAL(HoldTimer::ELAPSED, h.step(true, 31000, 15000));
+}
+
+// millis() == 0 на старте — это тоже момент начала, а не «не держится»
+void test_hold_start_at_zero_millis() {
+    HoldTimer h;
+    TEST_ASSERT_EQUAL(HoldTimer::STARTED, h.step(true, 0,  100));
+    TEST_ASSERT_EQUAL(HoldTimer::NONE,    h.step(true, 50, 100));
+}
+
+void test_hold_survives_millis_overflow() {
+    HoldTimer h;
+    const uint32_t t0 = 0xFFFFF000UL;
+    h.step(true, t0, 30000);
+    TEST_ASSERT_EQUAL(HoldTimer::NONE,    h.step(true, t0 + 20000UL, 30000));
+    TEST_ASSERT_EQUAL(HoldTimer::ELAPSED, h.step(true, t0 + 30000UL, 30000));
+}
+
+// Без часов замер идёт по millis(), как раньше: иначе датчик молчал бы
+// до первой синхронизации
+void test_sensor_clock_without_time_uses_interval() {
+    SensorClock c;
+    TEST_ASSERT_FALSE(c.due(1000,   -1, 60000));
+    TEST_ASSERT_TRUE (c.due(60000,  -1, 60000));
+    TEST_ASSERT_FALSE(c.due(61000,  -1, 60000));
+    TEST_ASSERT_TRUE (c.due(120000, -1, 60000));
+}
+
+// Время только что появилось — не мерим посреди минуты, ждём следующую:
+// иначе в историю лёг бы дубль секунды спустя после замера по millis()
+void test_sensor_clock_first_minute_waits() {
+    SensorClock c;
+    TEST_ASSERT_FALSE(c.due(1000, 5, 60000));
+    TEST_ASSERT_FALSE(c.due(2000, 5, 60000));
+    TEST_ASSERT_TRUE (c.due(3000, 6, 60000));
+}
+
+// Одна минута — один замер, сколько бы оборотов цикла на неё ни пришлось
+void test_sensor_clock_once_per_minute() {
+    SensorClock c;
+    c.due(1000, 5, 60000);
+    TEST_ASSERT_TRUE (c.due(2000, 6, 60000));
+    TEST_ASSERT_FALSE(c.due(2250, 6, 60000));
+    TEST_ASSERT_FALSE(c.due(59000, 6, 60000));
+}
+
+// В экономе — чётные минуты: момент замера не зависит от того, когда
+// часы включили
+void test_sensor_clock_eco_takes_even_minutes() {
+    SensorClock c;
+    c.due(1000, 3, 120000);
+    TEST_ASSERT_TRUE (c.due(2000, 4, 120000));
+    TEST_ASSERT_FALSE(c.due(3000, 5, 120000));
+    TEST_ASSERT_TRUE (c.due(4000, 6, 120000));
+}
+
+// Интервал короче минуты не превращается в деление на ноль
+void test_sensor_clock_short_interval_is_every_minute() {
+    SensorClock c;
+    c.due(1000, 7, 30000);
+    TEST_ASSERT_TRUE(c.due(2000, 8, 30000));
+    TEST_ASSERT_TRUE(c.due(3000, 9, 30000));
+}
+
+// Смена часа: 59 → 0 — новая минута, и она чётная
+void test_sensor_clock_hour_wrap() {
+    SensorClock c;
+    c.due(1000, 57, 120000);
+    TEST_ASSERT_TRUE (c.due(2000, 58, 120000));
+    TEST_ASSERT_FALSE(c.due(3000, 59, 120000));
+    TEST_ASSERT_TRUE (c.due(4000, 0,  120000));
+}
+
+// Пауза до смены секунды — с запасом в миллисекунду, чтобы проснуться уже
+// после границы
+void test_loop_pause_wakes_after_second_boundary() {
+    TEST_ASSERT_EQUAL_UINT32(101, loopIdlePauseMs(900, 250));
+    TEST_ASSERT_EQUAL_UINT32(2,   loopIdlePauseMs(999, 250));
+}
+
+// Но не дольше потолка: между секундами цикл набирает отсчёты АЦП
+void test_loop_pause_capped() {
+    TEST_ASSERT_EQUAL_UINT32(250, loopIdlePauseMs(0,   250));
+    TEST_ASSERT_EQUAL_UINT32(250, loopIdlePauseMs(750, 250));
+    TEST_ASSERT_EQUAL_UINT32(250, loopIdlePauseMs(751, 250));
+}
+
+// Ноль — это не пауза, а спин на полной частоте
+void test_loop_pause_never_zero() {
+    TEST_ASSERT_EQUAL_UINT32(1, loopIdlePauseMs(500, 0));
+}
+
+// Миллисекунды вне секунды (кривой вызов) не дают паузы длиннее секунды
+void test_loop_pause_clamps_garbage() {
+    TEST_ASSERT_EQUAL_UINT32(2, loopIdlePauseMs(5000, 2000));
+}
+
 // ─── Метео: производные ───────────────────────────────────
 void test_pressure_mmhg() {
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 760.0f, pressureToMmHg(1013.25f));
@@ -941,7 +1203,7 @@ void test_trendlog_empty() {
 void test_trendlog_keeps_order() {
     TrendHistory h;
     for (int i = 0; i < 3; i++)
-        h.push((uint32_t)i * 60000, true, 20.0f + i, 1000.0f + i, 100.0f + i, 0.5f);
+        h.push((uint32_t)i * 60000, true, 20.0f + i, 1000.0f + i, 0.5f);
 
     TEST_ASSERT_EQUAL_UINT16(3, h.size());
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.0f, h.at(0).temp);
@@ -954,7 +1216,7 @@ void test_trendlog_wraps_to_newest() {
     TrendHistory h;
     const int extra = 5;
     for (int i = 0; i < TREND_HISTORY_SIZE + extra; i++)
-        h.push((uint32_t)i * 60000, true, (float)i, 1000.0f, 100.0f, 0.0f);
+        h.push((uint32_t)i * 60000, true, (float)i, 1000.0f, 0.0f);
 
     TEST_ASSERT_EQUAL_UINT16(TREND_HISTORY_SIZE, h.size());
     TEST_ASSERT_FLOAT_WITHIN(0.001f, (float)extra, h.at(0).temp);
@@ -966,20 +1228,19 @@ void test_trendlog_wraps_to_newest() {
 // нулевая температура среди двадцати градусов испортила бы и линию, и масштаб
 void test_trendlog_invalid_is_nan() {
     TrendHistory h;
-    h.push(0, true, 21.0f, 1013.0f, 120.0f, 0.4f);
-    h.push(60000, false, 21.0f, 1013.0f, 120.0f, 0.4f);
+    h.push(0, true, 21.0f, 1013.0f, 0.4f);
+    h.push(60000, false, 21.0f, 1013.0f, 0.4f);
 
     TEST_ASSERT_FALSE(isnan(h.at(0).temp));
     TEST_ASSERT_TRUE(isnan(h.at(1).temp));
     TEST_ASSERT_TRUE(isnan(h.at(1).press));
-    TEST_ASSERT_TRUE(isnan(h.at(1).alt));
     TEST_ASSERT_TRUE(isnan(h.at(1).trend));
 }
 
 void test_trendlog_age_seconds() {
     TrendHistory h;
-    h.push(1000, true, 21.0f, 1013.0f, 120.0f, 0.0f);
-    h.push(61000, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+    h.push(1000, true, 21.0f, 1013.0f, 0.0f);
+    h.push(61000, true, 21.0f, 1013.0f, 0.0f);
 
     TEST_ASSERT_EQUAL_UINT32(120, h.ageS(0, 121000));
     TEST_ASSERT_EQUAL_UINT32(60,  h.ageS(1, 121000));
@@ -990,13 +1251,13 @@ void test_trendlog_age_seconds() {
 // момент прыгнул бы на полвека вперёд.
 void test_trendlog_age_survives_millis_overflow() {
     TrendHistory h;
-    h.push(0xFFFFFF00UL, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+    h.push(0xFFFFFF00UL, true, 21.0f, 1013.0f, 0.0f);
     TEST_ASSERT_EQUAL_UINT32(60, h.ageS(0, 0xFFFFFF00UL + 60000UL));
 }
 
 void test_trendlog_clear() {
     TrendHistory h;
-    h.push(0, true, 21.0f, 1013.0f, 120.0f, 0.0f);
+    h.push(0, true, 21.0f, 1013.0f, 0.0f);
     h.clear();
     TEST_ASSERT_EQUAL_UINT16(0, h.size());
 }
@@ -1288,6 +1549,37 @@ int main(int argc, char** argv) {
     RUN_TEST(test_power_mode_from_name);
     RUN_TEST(test_power_mode_from_name_rejects_garbage);
     RUN_TEST(test_power_mode_from_name_rejects_removed_survival);
+
+    RUN_TEST(test_screen_window_close_turns_panel_off);
+    RUN_TEST(test_screen_no_edge_on_first_step);
+    RUN_TEST(test_screen_window_open_turns_on_once);
+    RUN_TEST(test_screen_manual_off_by_day_returns_next_morning);
+    RUN_TEST(test_screen_peek_holds_then_expires);
+    RUN_TEST(test_screen_peek_does_not_beat_battery);
+    RUN_TEST(test_screen_morning_after_night_peek);
+    RUN_TEST(test_screen_window_open_clears_peek);
+    RUN_TEST(test_screen_request_refused_on_battery);
+    RUN_TEST(test_screen_request_refused_at_zero_brightness);
+    RUN_TEST(test_screen_request_by_day_starts_no_peek);
+    RUN_TEST(test_screen_peek_left_rounds_up);
+    RUN_TEST(test_screen_peek_survives_millis_overflow);
+    RUN_TEST(test_screen_peek_end_never_zero);
+
+    RUN_TEST(test_hold_needs_full_duration);
+    RUN_TEST(test_hold_resets_when_condition_drops);
+    RUN_TEST(test_hold_repeats_after_elapsed);
+    RUN_TEST(test_hold_start_at_zero_millis);
+    RUN_TEST(test_hold_survives_millis_overflow);
+    RUN_TEST(test_sensor_clock_without_time_uses_interval);
+    RUN_TEST(test_sensor_clock_first_minute_waits);
+    RUN_TEST(test_sensor_clock_once_per_minute);
+    RUN_TEST(test_sensor_clock_eco_takes_even_minutes);
+    RUN_TEST(test_sensor_clock_short_interval_is_every_minute);
+    RUN_TEST(test_sensor_clock_hour_wrap);
+    RUN_TEST(test_loop_pause_wakes_after_second_boundary);
+    RUN_TEST(test_loop_pause_capped);
+    RUN_TEST(test_loop_pause_never_zero);
+    RUN_TEST(test_loop_pause_clamps_garbage);
 
     RUN_TEST(test_pressure_mmhg);
     RUN_TEST(test_qnh_at_sea_level);

@@ -29,8 +29,14 @@ jobs:
           key: ${{ runner.os }}-pio-native-${{ hashFiles('platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-native-
 
+      # Версия ядра закреплена под платформу pioarduino 55.03.39. PlatformIO
+      # 6.2 хочет SCons 4.11, платформа для гибридной сборки (custom_sdkconfig
+      # в platformio.ini) ставит в тот же каталог свой 4.8.1, и посреди сборки
+      # они затирают друг друга: линковка падает на пропавшем модуле SCons.
+      # 6.1.19 закрепляет тот же 4.8.1, что и платформа. Поднимать — вместе
+      # с платформой, проверив гибридную сборку.
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.1.19
 
       # cppcheck нужен тесту test_lint: без него тот пропускает себя, и
       # статический анализ в CI не выполнялся бы вовсе. Отдельной работы
@@ -61,7 +67,7 @@ jobs:
           restore-keys: ${{ runner.os }}-pio-esp32-
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.1.19   # почему не свежее — в работе test
 
       - name: Build firmware
         run: pio run -e esp32c6
