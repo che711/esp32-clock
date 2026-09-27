@@ -184,6 +184,11 @@ static void wsSendOrDrop(int fd, httpd_ws_frame_t& frame) {
 static void buildJson(char* buf, size_t sz) {
     char uptimeBuf[32];
     formatUptime(millis() / 1000, uptimeBuf, sizeof(uptimeBuf));
+    // Строка с экрана часов: дашборд показывает её как есть, а не округляет
+    // bmp_temp второй раз (почему — у displayTempText()). Сам bmp_temp с
+    // сотыми остаётся для графиков, min/avg/max и °F.
+    char tempDisp[12];
+    displayTempText(tempDisp, sizeof(tempDisp));
     snprintf(buf, sz,
         "{"
         "\"time\":\"%s\","
@@ -207,6 +212,7 @@ static void buildJson(char* buf, size_t sz) {
         "\"sw_gen\":%lu,"
         "\"bmp_valid\":%s,"
         "\"bmp_temp\":%.2f,"
+        "\"bmp_temp_disp\":\"%s\","
         "\"pressure\":%.2f,"
         "\"pressure_mmhg\":%.1f,"
         "\"trend\":%.2f,"
@@ -250,6 +256,7 @@ static void buildJson(char* buf, size_t sz) {
         (unsigned long)stopwatch.gen,
         weather.valid ? "true" : "false",
         weather.temperature,
+        tempDisp,
         weather.pressure,
         weather.pressureMmHg,
         weather.pressureTrend,

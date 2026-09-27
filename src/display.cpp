@@ -204,6 +204,15 @@ const char* displayBrightnessLabel() { return brightnessLabel; }
 
 void displayInvalidateStopwatch() { swMsBoxX = -1; swLastFull[0] = '\0'; }
 
+// Одна точка округления на экран и дашборд. Раньше дашборд округлял сам, из
+// bmp_temp с сотыми, и выходило двойное округление: 25.047 здесь давало 25.0,
+// а в снимке 25.05, которое браузер доводил до 25.1. Теперь он показывает
+// эту строку как есть (bmp_temp_disp в web_api.cpp).
+void displayTempText(char* buf, size_t sz) {
+    if (weather.valid) snprintf(buf, sz, "%.1f", weather.temperature);
+    else               snprintf(buf, sz, "--");
+}
+
 // ─── Нижняя строка: погода + батарея ─────────────────────
 #if HAS_DISPLAY
 // Маленькая иконка батареи: рамка + «носик» + заливка по проценту.
@@ -410,8 +419,7 @@ void displayDraw() {
         } else {
             // Знак градуса — кружком: в наборе _tr символа ° нет.
             char tstr[8];
-            if (weather.valid) snprintf(tstr, sizeof(tstr), "%.1f", weather.temperature);
-            else               snprintf(tstr, sizeof(tstr), "--");
+            displayTempText(tstr, sizeof(tstr));
 
             int avail = leftW - DEGREE_W;
             int th = 32;

@@ -1864,7 +1864,12 @@
 
     // ── Метрики BMP280 ──
     if (d.bmp_valid) {
-      document.getElementById('mt-val').textContent = tempTxt(d.bmp_temp);
+      // Главное число — строкой с экрана часов, а не своим округлением
+      // bmp_temp: в снимке он с сотыми, и второе округление расходилось с
+      // экраном на десятую (25.05 → 25.1 при 25.0 на часах). В °F экрану
+      // сравнивать не с чем — там пересчёт, как и раньше.
+      document.getElementById('mt-val').textContent =
+        (!isFahrenheit && d.bmp_temp_disp) ? d.bmp_temp_disp : tempTxt(d.bmp_temp);
       document.getElementById('mt-min').textContent = tempTxt(stats.temp.min);
       document.getElementById('mt-avg').textContent = tempTxt(avg(stats.temp));
       document.getElementById('mt-max').textContent = tempTxt(stats.temp.max);
