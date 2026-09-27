@@ -170,11 +170,12 @@
   .clock-card { order: 2; }
   .metric-grid{ order: 3; }
   .stopwatch-card { order: 4; }
-  #card-system{ order: 5; }
-  #card-log   { order: 6; }
-  #card-api   { order: 7; }
-  #card-chip  { order: 8; }
-  .status-bar { order: 9; }
+  #card-battery { order: 5; }
+  #card-system{ order: 6; }
+  #card-log   { order: 7; }
+  #card-api   { order: 8; }
+  #card-chip  { order: 9; }
+  .status-bar { order: 10; }
   body.sw-active .stopwatch-card { order: 1; }
 
   /* ── Карточки ── */
@@ -227,7 +228,11 @@
   .clock-card { --g: var(--g-clock); --g2: var(--g-clock2); }
 
   .metric-card .m-title, .metric-card .spark-label,
-  .clock-card .eyebrow                 { color: rgba(255,255,255,0.76); }
+  .clock-card .eyebrow,
+  .metric-card .chevron, .clock-card .chevron { color: rgba(255,255,255,0.76); }
+  /* Акцент при наведении на градиенте теряется — там подсвечиваем белым. */
+  .metric-card .toggle:hover .chevron,
+  .clock-card .toggle:hover .chevron   { color: #fff; }
   .metric-card .m-value, .clock-card #time { color: #fff; }
   .metric-card .m-unit                 { color: rgba(255,255,255,0.82); }
   .metric-card .m-desc                 { color: rgba(255,255,255,0.85); }
@@ -296,6 +301,10 @@
                 padding: 28px 24px 22px; text-align: center; }
   .eyebrow { position: relative; font-size: 9.5px; font-weight: 700; color: var(--text-faint);
              letter-spacing: 2.4px; text-transform: uppercase; }
+  /* Подпись у часов стоит по центру; стрелка в потоке сдвинула бы её влево,
+     поэтому она вынесена к правому краю, как у остальных блоков. */
+  .clock-card .eyebrow .chevron { position: absolute; top: 0; bottom: 0; right: 0;
+                                  display: flex; align-items: center; letter-spacing: 0; }
   #time {
     position: relative; font-family: var(--font-mono);
     font-size: clamp(44px, 10vw, 82px); font-weight: 700;
@@ -319,11 +328,15 @@
   /* Карточек нечётное число: последняя иначе висит половинкой рядом с дырой. */
   .metric-grid > .metric-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .metric-card { display: flex; flex-direction: column; gap: 13px; padding: 19px 19px 17px; }
+  /* Иначе сетка растянет свёрнутую карточку до высоты соседней по ряду,
+     и от сворачивания останется пустая цветная плашка. */
+  .metric-grid > .metric-card.collapsed { align-self: start; }
   .m-temp  { --c: var(--c-temp);  --c2: var(--c-temp2);  --c-soft: var(--c-temp-soft);  }
   .m-press { --c: var(--c-press); --c2: var(--c-press2); --c-soft: var(--c-press-soft); }
   .m-fc    { --c: var(--c-fc);    --c2: var(--c-fc2);    --c-soft: var(--c-fc-soft);    }
 
   .m-head { position: relative; display: flex; align-items: center; gap: 9px; }
+  .m-head .chevron { margin-left: auto; }
   .m-icon { font-size: 14px; line-height: 1; filter: saturate(1.1); }
   .m-title { font-size: 10.5px; font-weight: 700; letter-spacing: 2px;
              text-transform: uppercase; color: var(--text-dim); }
@@ -387,11 +400,19 @@
   .panel-head { display: flex; align-items: center; justify-content: space-between;
                 gap: 12px; flex-wrap: wrap; }
   .panel-title { font-size: 15px; font-weight: 600; letter-spacing: 0.2px; color: var(--text); }
-  .panel-head.toggle { cursor: pointer; user-select: none; -webkit-user-select: none; }
-  .panel-head.toggle:hover .chevron { color: var(--accent); }
+  /* Заголовки у блоков разные — .panel-head, .m-head, .eyebrow у часов, —
+     поэтому сворачиваемость держится на отдельном классе .toggle, а не на
+     .panel-head: вешать .panel-head на шапку метрики значило бы растащить
+     иконку и название по краям его space-between. */
+  .toggle { cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .toggle:hover .chevron { color: var(--accent); }
   .chevron { font-size: 12px; color: var(--text-faint); transition: transform 0.2s, color 0.2s; }
   .card.collapsed .chevron { transform: rotate(-90deg); }
-  .card.collapsed > *:not(.panel-head) { display: none; }
+  .card.collapsed > *:not(.toggle) { display: none; }
+  /* Правый край шапки, где кроме стрелки есть своё: у секундомера метка
+     синхронизации, у лога счётчик строк. Третьим ребёнком space-between
+     поставил бы метку посередине. */
+  .head-side { display: flex; align-items: center; gap: 12px; }
 
   /* ── Плитки ── */
   .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
@@ -641,8 +662,8 @@
   </div>
 
   <!-- ── Часы ── -->
-  <div class="card accented clock-card">
-    <div class="eyebrow">Local time</div>
+  <div class="card accented clock-card" id="card-clock">
+    <div class="eyebrow toggle" onclick="toggleCard('card-clock')">Local time<span class="chevron">▾</span></div>
     <div id="time">--:--:--</div>
     <div class="sec-track"><div id="sec-bar"></div></div>
     <div class="clock-meta">
@@ -656,8 +677,8 @@
   <div class="metric-grid">
 
     <!-- Температура -->
-    <div class="card accented metric-card m-temp">
-      <div class="m-head"><span class="m-icon">🌡️</span><span class="m-title">Temperature</span></div>
+    <div class="card accented metric-card m-temp" id="card-temp">
+      <div class="m-head toggle" onclick="toggleCard('card-temp')"><span class="m-icon">🌡️</span><span class="m-title">Temperature</span><span class="chevron">▾</span></div>
       <div class="m-value"><span id="mt-val">—</span><span class="m-unit" id="mt-unit">°C</span></div>
       <div class="mmm">
         <div class="mmm-cell"><span class="mmm-key">Min</span><span class="mmm-val" id="mt-min">—</span></div>
@@ -677,8 +698,8 @@
     </div>
 
     <!-- Давление -->
-    <div class="card accented metric-card m-press">
-      <div class="m-head"><span class="m-icon">🌀</span><span class="m-title">Pressure</span></div>
+    <div class="card accented metric-card m-press" id="card-press">
+      <div class="m-head toggle" onclick="toggleCard('card-press')"><span class="m-icon">🌀</span><span class="m-title">Pressure</span><span class="chevron">▾</span></div>
       <div class="m-value"><span id="mp-val">—</span><span class="m-unit">hPa</span></div>
       <div class="mmm">
         <div class="mmm-cell"><span class="mmm-key">Min</span><span class="mmm-val" id="mp-min">—</span></div>
@@ -693,8 +714,8 @@
     </div>
 
     <!-- Прогноз / барический тренд -->
-    <div class="card accented metric-card m-fc">
-      <div class="m-head"><span class="m-icon">📈</span><span class="m-title">Pressure trend</span></div>
+    <div class="card accented metric-card m-fc" id="card-fc">
+      <div class="m-head toggle" onclick="toggleCard('card-fc')"><span class="m-icon">📈</span><span class="m-title">Pressure trend</span><span class="chevron">▾</span></div>
       <div class="m-value"><span id="mf-val">—</span><span class="m-unit">hPa/h</span></div>
       <div class="m-desc" id="mf-desc">Barometric change over the last hour</div>
       <div class="pill" id="mf-pill"><span class="pill-dot"></span><span id="mf-pill-txt">—</span></div>
@@ -707,10 +728,13 @@
   </div>
 
   <!-- ── Секундомер ── -->
-  <div class="card accented stopwatch-card">
-    <div class="panel-head">
+  <div class="card accented stopwatch-card" id="card-stopwatch">
+    <div class="panel-head toggle" onclick="toggleCard('card-stopwatch')">
       <div class="panel-title">Stopwatch</div>
-      <span class="sw-sync" id="sw-sync">synced with device</span>
+      <div class="head-side">
+        <span class="sw-sync" id="sw-sync">synced with device</span>
+        <span class="chevron">▾</span>
+      </div>
     </div>
     <div class="sw-display" id="sw-display">00:00<span class="sw-ms">.000</span></div>
     <div class="sw-controls">
@@ -719,6 +743,50 @@
       <button class="sw-btn" id="sw-reset-btn" onclick="swReset()">Reset</button>
     </div>
     <div class="sw-laps" id="sw-laps"></div>
+  </div>
+
+  <!-- ── Батарея и питание ── -->
+  <div class="card panel" id="card-battery">
+    <div class="panel-head toggle" onclick="toggleCard('card-battery')">
+      <div class="panel-title">Battery &amp; power</div>
+      <span class="chevron">▾</span>
+    </div>
+
+    <div class="tile" id="bat-tile">
+      <div class="tile-label">Battery</div>
+      <div class="tile-split">
+        <div class="tile-row">
+          <div class="batt-icon"><div class="batt-fill" id="bat-fill"></div></div>
+          <div>
+            <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
+            <div class="kv-note" id="bat-note">battery</div>
+            <div class="kv-note" id="bat-mah" title="Inferred from voltage — there is no coulomb counter on board">—</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="kv-big"><span id="bat-v">—</span><span class="u">V</span></div>
+          <div class="kv-note">voltage</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bright-block">
+      <div class="bright-top">
+        <div class="bright-left">
+          <div class="tile-label">Power saving</div>
+          <span class="level-chip" id="pm-label">—</span>
+        </div>
+        <div class="seg" id="pm-seg">
+          <button class="mode-btn" id="pm-normal" onclick="setPowerMode('normal')">Normal</button>
+          <button class="mode-btn" id="pm-eco"    onclick="setPowerMode('eco')">Eco</button>
+        </div>
+      </div>
+      <div class="tile-sub" id="pm-hint">—</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display on</button>
+    </div>
   </div>
 
   <!-- ── Система и управление ── -->
@@ -758,24 +826,6 @@
       <div class="tile">
         <div class="tile-label">Chip temp</div>
         <div class="tile-value"><span id="chip-temp">—</span><span class="u" id="chip-temp-unit">°C</span></div>
-      </div>
-    </div>
-
-    <div class="tile" id="bat-tile">
-      <div class="tile-label">Battery</div>
-      <div class="tile-split">
-        <div class="tile-row">
-          <div class="batt-icon"><div class="batt-fill" id="bat-fill"></div></div>
-          <div>
-            <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
-            <div class="kv-note" id="bat-note">battery</div>
-            <div class="kv-note" id="bat-mah" title="Inferred from voltage — there is no coulomb counter on board">—</div>
-          </div>
-        </div>
-        <div style="text-align:right">
-          <div class="kv-big"><span id="bat-v">—</span><span class="u">V</span></div>
-          <div class="kv-note">voltage</div>
-        </div>
       </div>
     </div>
 
@@ -824,37 +874,25 @@
       </div>
     </div>
 
-    <div class="bright-block">
-      <div class="bright-top">
-        <div class="bright-left">
-          <div class="tile-label">Power saving</div>
-          <span class="level-chip" id="pm-label">—</span>
-        </div>
-        <div class="seg" id="pm-seg">
-          <button class="mode-btn" id="pm-normal" onclick="setPowerMode('normal')">Normal</button>
-          <button class="mode-btn" id="pm-eco"    onclick="setPowerMode('eco')">Eco</button>
-        </div>
-      </div>
-      <div class="tile-sub" id="pm-hint">—</div>
-    </div>
-
     <div class="btn-row">
       <button class="btn-action" onclick="exportCsv()">Export CSV</button>
       <button class="btn-action" onclick="exportJson()">Export JSON</button>
       <button class="btn-action" onclick="resetStats()">Reset min/max</button>
-      <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display on</button>
       <button class="btn-action btn-reboot" id="btn-reboot" onclick="doReboot()">Reboot</button>
     </div>
   </div>
 
   <!-- ── Лог событий ── -->
   <div class="card panel" id="card-log">
-    <div class="panel-head">
+    <div class="panel-head toggle" onclick="toggleCard('card-log')">
       <div class="log-left">
         <div class="panel-title">Event log</div>
         <span class="log-conn"><span class="ws-dot" id="log-dot"></span><span id="log-conn-label">Connecting</span></span>
       </div>
-      <span class="log-count"><span id="log-count">0</span>/500 lines</span>
+      <div class="head-side">
+        <span class="log-count"><span id="log-count">0</span>/500 lines</span>
+        <span class="chevron">▾</span>
+      </div>
     </div>
     <div class="log-chips">
       <button class="log-chip on" data-lvl="error" onclick="toggleLvl(this)"><span class="cdot"></span>Error</button>
@@ -978,14 +1016,21 @@
   function toggleCard(id) {
     const card = document.getElementById(id);
     if (!card) return;
-    card.classList.toggle('collapsed');
-    try { localStorage.setItem('collapsed:' + id, card.classList.contains('collapsed') ? '1' : '0'); } catch(e) {}
+    const collapsed = card.classList.toggle('collapsed');
+    lsSet('collapsed:' + id, collapsed ? '1' : '0');
+    // Под display:none у лога нулевые размеры: logEvent считает, что он «внизу»,
+    // и ставит scrollTop в ноль, а браузер позицию скрытого блока не хранит.
+    // Без этого развёрнутый лог открывался бы с самой старой строки.
+    if (!collapsed && id === 'card-log') {
+      const body = document.getElementById('log-body');
+      body.scrollTop = body.scrollHeight;
+    }
   }
-  ['card-system', 'card-log', 'card-api', 'card-chip'].forEach(function(id) {
-    try {
-      if (localStorage.getItem('collapsed:' + id) === '1')
-        document.getElementById(id).classList.add('collapsed');
-    } catch(e) {}
+  // Обход, а не список id: список уже разошёлся с разметкой — card-log в нём
+  // был, а сворачиваемой шапки у лога не было.
+  document.querySelectorAll('.card[id] > .toggle').forEach(function(head) {
+    const card = head.parentElement;
+    if (lsGet('collapsed:' + card.id) === '1') card.classList.add('collapsed');
   });
 
   // ── Состояние ────────────────────────────────────────

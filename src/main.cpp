@@ -28,6 +28,14 @@ char   dayFullBuf[12];
 bool   timeSynced = false;
 String localIP    = "";
 
+// Поправка на тепло панели (BMP280_SCREEN_HEAT_C в config.h). Берётся по
+// состоянию экрана в момент замера. HAS_DISPLAY проверяется отдельно: без
+// подпаянной панели displayIsOn() всё равно отвечает «горит», а греть
+// датчик нечему.
+static float sensorTempOffset() {
+    return (HAS_DISPLAY && displayIsOn()) ? -BMP280_SCREEN_HEAT_C : 0.0f;
+}
+
 // Точка истории кладётся ровно там, где датчик прочитан, — и только там.
 // Копить её из broadcast-кадров нельзя: те уходят раз в секунду и минуту
 // подряд несут одно и то же число, из чего график получался ступенчатым.
@@ -596,7 +604,7 @@ static void updateWeather() {
     // не убегут, а каждый опрос I²C — это работа шины и ядра.
     if (sensorDue(now)) {
         lastSensorMs = now;
-        weather = sensorRead();
+        weather = sensorRead(sensorTempOffset());
         historyPush(now);
         // Вся индикация под профилем разом: в экономе она молчит, включая
         // аварийную. Гашение вынесено наверх функции — здесь остаётся только
@@ -748,7 +756,7 @@ void setup() {
         Serial.println("RTC пережил перезагрузку, время на месте");
     }
 
-    weather = sensorRead();
+    weather = sensorRead(sensorTempOffset());
     historyPush(millis());
 
     // Связь и время в setup() не ждём — их доводит loop(): подключение крутит
