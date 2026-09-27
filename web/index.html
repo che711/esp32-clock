@@ -170,11 +170,12 @@
   .clock-card { order: 2; }
   .metric-grid{ order: 3; }
   .stopwatch-card { order: 4; }
-  #card-system{ order: 5; }
-  #card-log   { order: 6; }
-  #card-api   { order: 7; }
-  #card-chip  { order: 8; }
-  .status-bar { order: 9; }
+  #card-battery { order: 5; }
+  #card-system{ order: 6; }
+  #card-log   { order: 7; }
+  #card-api   { order: 8; }
+  #card-chip  { order: 9; }
+  .status-bar { order: 10; }
   body.sw-active .stopwatch-card { order: 1; }
 
   /* ── Карточки ── */
@@ -744,6 +745,50 @@
     <div class="sw-laps" id="sw-laps"></div>
   </div>
 
+  <!-- ── Батарея и питание ── -->
+  <div class="card panel" id="card-battery">
+    <div class="panel-head toggle" onclick="toggleCard('card-battery')">
+      <div class="panel-title">Battery &amp; power</div>
+      <span class="chevron">▾</span>
+    </div>
+
+    <div class="tile" id="bat-tile">
+      <div class="tile-label">Battery</div>
+      <div class="tile-split">
+        <div class="tile-row">
+          <div class="batt-icon"><div class="batt-fill" id="bat-fill"></div></div>
+          <div>
+            <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
+            <div class="kv-note" id="bat-note">battery</div>
+            <div class="kv-note" id="bat-mah" title="Inferred from voltage — there is no coulomb counter on board">—</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="kv-big"><span id="bat-v">—</span><span class="u">V</span></div>
+          <div class="kv-note">voltage</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bright-block">
+      <div class="bright-top">
+        <div class="bright-left">
+          <div class="tile-label">Power saving</div>
+          <span class="level-chip" id="pm-label">—</span>
+        </div>
+        <div class="seg" id="pm-seg">
+          <button class="mode-btn" id="pm-normal" onclick="setPowerMode('normal')">Normal</button>
+          <button class="mode-btn" id="pm-eco"    onclick="setPowerMode('eco')">Eco</button>
+        </div>
+      </div>
+      <div class="tile-sub" id="pm-hint">—</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display on</button>
+    </div>
+  </div>
+
   <!-- ── Система и управление ── -->
   <div class="card panel" id="card-system">
     <div class="panel-head toggle" onclick="toggleCard('card-system')">
@@ -781,24 +826,6 @@
       <div class="tile">
         <div class="tile-label">Chip temp</div>
         <div class="tile-value"><span id="chip-temp">—</span><span class="u" id="chip-temp-unit">°C</span></div>
-      </div>
-    </div>
-
-    <div class="tile" id="bat-tile">
-      <div class="tile-label">Battery</div>
-      <div class="tile-split">
-        <div class="tile-row">
-          <div class="batt-icon"><div class="batt-fill" id="bat-fill"></div></div>
-          <div>
-            <div class="kv-big"><span id="bat-pct">—</span><span class="u">%</span></div>
-            <div class="kv-note" id="bat-note">battery</div>
-            <div class="kv-note" id="bat-mah" title="Inferred from voltage — there is no coulomb counter on board">—</div>
-          </div>
-        </div>
-        <div style="text-align:right">
-          <div class="kv-big"><span id="bat-v">—</span><span class="u">V</span></div>
-          <div class="kv-note">voltage</div>
-        </div>
       </div>
     </div>
 
@@ -847,25 +874,10 @@
       </div>
     </div>
 
-    <div class="bright-block">
-      <div class="bright-top">
-        <div class="bright-left">
-          <div class="tile-label">Power saving</div>
-          <span class="level-chip" id="pm-label">—</span>
-        </div>
-        <div class="seg" id="pm-seg">
-          <button class="mode-btn" id="pm-normal" onclick="setPowerMode('normal')">Normal</button>
-          <button class="mode-btn" id="pm-eco"    onclick="setPowerMode('eco')">Eco</button>
-        </div>
-      </div>
-      <div class="tile-sub" id="pm-hint">—</div>
-    </div>
-
     <div class="btn-row">
       <button class="btn-action" onclick="exportCsv()">Export CSV</button>
       <button class="btn-action" onclick="exportJson()">Export JSON</button>
       <button class="btn-action" onclick="resetStats()">Reset min/max</button>
-      <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display on</button>
       <button class="btn-action btn-reboot" id="btn-reboot" onclick="doReboot()">Reboot</button>
     </div>
   </div>
