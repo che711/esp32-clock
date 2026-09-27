@@ -181,7 +181,13 @@ static void applyAutoLevel(BrightnessLevel b) {
     // расписание и порог заряда.
     uint8_t scaled = (uint8_t)((uint32_t)b.contrast * autoScalePct / 100);
     if (scaled == 0) scaled = 1;
-    if (scaled != currentLevel) {
+    // Метка сверяется наравне с уровнем. Раньше смотрели только на уровень, а
+    // после возврата из ручного режима он может совпасть с авто-уровнем часа:
+    // 71 % на ползунке — это ровно Evening (181). Тогда applyLevel() не
+    // вызывался, и дашборд до смены часа показывал «Manual» при включённом
+    // авто. strcmp, а не сравнение указателей: склеивать одинаковые литералы
+    // компилятор не обязан.
+    if (scaled != currentLevel || strcmp(b.label, brightnessLabel) != 0) {
         applyLevel(scaled, b.label);
         Serial.printf("Auto brightness -> %s (%d)\n", brightnessLabel, currentLevel);
     }

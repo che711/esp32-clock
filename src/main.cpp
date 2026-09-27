@@ -84,13 +84,19 @@ static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
 
 // Температура кристалла: читаем не чаще раза в 10 с (temperatureRead
 // на C6 может блокировать на десятки мс — незачем дёргать каждую секунду).
+//
+// NAN в кэш не пускаем. Если temperatureRead() вернёт его (ошибка драйвера
+// датчика), число уйдёт в снимок как `nan` — это не JSON, и дашборд отбросит
+// каждый кадр до следующего чтения через 10 с — замрут все плитки, а не одна.
+// Прошлое значение тут почти не врёт: кристалл за десять секунд не остывает.
 float dieTempC() {
     static float    cached = 0.0f;
     static uint32_t last   = 0;
     uint32_t now = millis();
     if (last == 0 || now - last >= 10000) {
-        last   = now ? now : 1;
-        cached = temperatureRead();
+        last = now ? now : 1;
+        float t = temperatureRead();
+        if (!isnan(t)) cached = t;
     }
     return cached;
 }
