@@ -172,7 +172,8 @@ OLED разведён на правый ряд одним шлейфом: SPI �
 Официальная платформа `espressif32` **не поддерживает ESP32-C6** (застряла на Arduino core 2.x). Используется форк **pioarduino** — он уже прописан в `platformio.ini`.
 
 ```bash
-# 1. В src/config.h укажи Wi-Fi (только 2.4 ГГц), TZ и, при необходимости, пины
+# 1. Создай src/secrets.h с Wi-Fi (только 2.4 ГГц) — образец в шапке src/config.h;
+#    в src/config.h — TZ и, при необходимости, пины
 # 2. Сборка и прошивка
 pio run -t upload
 pio device monitor      # затем нажми RST
