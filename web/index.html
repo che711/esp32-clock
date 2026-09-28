@@ -415,11 +415,21 @@
   .head-side { display: flex; align-items: center; gap: 12px; }
 
   /* ── Плитки ── */
-  .tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  /* Колонок ровно 4, а не auto-fit: auto-fit на ширине ~830px давал 5
+     колонок, RAM в span 2 занимала две, и Chip temp уезжала в ряд одна; а
+     вторая сетка (сеть) и кнопки делились на 3 и 2 — линии не сходились.
+     8 плиток = 2 ряда по 4, а зазор 2-колоночного .btn-row при том же gap
+     попадает ровно на линию между 2-й и 3-й колонками.
+     Ряды 1fr — одной высоты, по самой высокой (RAM с полоской). */
+  .tile-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+               grid-auto-rows: 1fr; gap: 12px; }
   .tile { background: var(--surface-2); border: 1px solid var(--line-soft);
           border-radius: 12px; padding: 12px 14px;
           display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .tile.span2 { grid-column: span 2; }
+  /* Нижняя подпись — к низу плитки: так «boot: USB», «29% / 71%», «Good» и
+     «viewing now» стоят на одной линии в любом ряду. */
+  .tile-grid .tile > .tile-sub,
+  .tile-grid .tile > .tile-split { margin-top: auto; }
   .tile-label { font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
                 text-transform: uppercase; color: var(--text-faint); }
   .tile-value { font-family: var(--font-mono); font-size: 17px; font-weight: 600;
@@ -525,6 +535,9 @@
 
   /* ── Кнопки действий ── */
   .btn-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  /* Пара кнопок под сеткой плиток: всегда 2 колонки. С auto-fit на телефоне
+     (<292px) они вставали друг под другом, а плитки — по две в ряд. */
+  .btn-row.pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .btn-action { font-family: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: 0.2px;
                 padding: 12px 14px; border-radius: 11px; cursor: pointer; white-space: nowrap;
                 border: 1px solid var(--line); background: var(--surface-2); color: var(--text-dim);
@@ -637,12 +650,15 @@
            pointer-events: none; white-space: nowrap; z-index: 100; }
   .toast.show { opacity: 1; }
 
+  /* 4 колонки, пока в плитку влезают 15 моноширинных знаков по ~10.2px:
+     аптайм "12d 05h 17m 45s" и IP вида "192.168.100.200". Это ~154px текста
+     + 30px отступов и рамки, ×4 + зазоры + поля панели и страницы ≈ 840px.
+     Уже — 2 колонки: ряды по 2 плитки, и зазор кнопок снова на линии. */
+  @media (max-width: 860px) {
+    .tile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   @media (max-width: 720px) {
     .metric-grid { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 520px) {
-    .tile.span2 { grid-column: span 1; }
-    .tile-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   }
   @media (prefers-reduced-motion: reduce) {
     *, .card { animation: none !important; transition: none !important; }
@@ -825,7 +841,7 @@
         <div class="tile-value" id="uptime-label">—</div>
         <div class="tile-sub" id="reset-reason" title="Why the clock booted last time">—</div>
       </div>
-      <div class="tile span2">
+      <div class="tile">
         <div class="tile-label">RAM</div>
         <div class="tile-value"><span id="ram-val">—</span><span class="u">KB</span></div>
         <div class="mini-bar"><div class="mini-fill" id="ram-bar"></div></div>
@@ -835,24 +851,16 @@
         </div>
       </div>
       <div class="tile">
+        <div class="tile-label">Chip temp</div>
+        <div class="tile-value"><span id="chip-temp">—</span><span class="u" id="chip-temp-unit">°C</span></div>
+      </div>
+      <div class="tile">
         <div class="tile-label">Requests</div>
         <div class="tile-row">
           <span class="req-dot"></span>
           <div class="tile-value" id="req-count">—</div>
         </div>
       </div>
-      <div class="tile">
-        <div class="tile-label">Clients</div>
-        <div class="tile-value" id="clients-val">—</div>
-        <div class="tile-sub">viewing now</div>
-      </div>
-      <div class="tile">
-        <div class="tile-label">Chip temp</div>
-        <div class="tile-value"><span id="chip-temp">—</span><span class="u" id="chip-temp-unit">°C</span></div>
-      </div>
-    </div>
-
-    <div class="tile-grid">
       <div class="tile">
         <div class="tile-label">SSID</div>
         <div class="tile-value" id="ssid">—</div>
@@ -874,9 +882,14 @@
         <div class="tile-label">IP address</div>
         <div class="tile-value" id="ip">—</div>
       </div>
+      <div class="tile">
+        <div class="tile-label">Clients</div>
+        <div class="tile-value" id="clients-val">—</div>
+        <div class="tile-sub">viewing now</div>
+      </div>
     </div>
 
-    <div class="btn-row">
+    <div class="btn-row pair">
       <button class="btn-action" onclick="exportCsv()">Export CSV</button>
       <button class="btn-action" onclick="exportJson()">Export JSON</button>
     </div>
