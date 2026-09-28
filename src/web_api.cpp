@@ -14,6 +14,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include "web_ui_gz.h"   // генерируется из web/index.html при сборке
+#include "fw_version.h"   // git describe и время сборки, тоже при сборке
 
 // ============================================================
 //  web_api.cpp — веб-сервер, WebSocket и сборка JSON.
@@ -51,7 +52,7 @@ static std::atomic<uint32_t> requestCount{0};
 // Буфер снимка. Один на все три места, где он собирается, — иначе при
 // добавлении поля легко нарастить формат и забыть один из них: snprintf
 // обрежет строку молча, и дашборд получит JSON без закрывающей скобки.
-// Сейчас снимок занимает ~830 байт; запас — на длинный SSID и на пару
+// Сейчас снимок занимает ~880 байт; запас — на длинный SSID и на пару
 // будущих полей.
 static const size_t JSON_BUF = 1280;
 
@@ -245,7 +246,9 @@ static void buildJson(char* buf, size_t sz) {
         "\"sensor_eco_s\":%lu,"
         "\"reset_reason\":\"%s\","
         "\"reset_abnormal\":%s,"
-        "\"requests\":%lu"
+        "\"requests\":%lu,"
+        "\"fw_version\":\"%s\","
+        "\"fw_built\":\"%s\""
         "}",
         timeBuf, dateBuf, dayFullBuf,
         uptimeBuf,
@@ -298,7 +301,14 @@ static void buildJson(char* buf, size_t sz) {
         (unsigned long)(powerProfile(POWER_ECO).sensorMs / 1000UL),
         resetReasonName(),
         resetWasAbnormal() ? "true" : "false",
-        (unsigned long)requestCount.load()
+        (unsigned long)requestCount.load(),
+        // Постоянные, но едут в каждом кадре: других данных, кроме снимка,
+        // страница не получает. Отдельный маршрут ради одной строки — лишний
+        // код и в прошивке, и в странице; ~50 байт к ~830 раз в секунду
+        // дешевле. Экранировать нечего — gen_version.py пропускает в версию
+        // только [A-Za-z0-9._+-].
+        FW_VERSION,
+        FW_BUILT
     );
 }
 

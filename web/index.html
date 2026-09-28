@@ -145,6 +145,7 @@
   /* Шапка лежит прямо на цветном фоне — значит светлая */
   [data-theme="light"] .app-title      { color: rgba(255,255,255,0.72); }
   [data-theme="light"] .app-title b    { color: #fff; }
+  [data-theme="light"] .fw-info        { color: rgba(255,255,255,0.62); }
   [data-theme="light"] .host-chip      { color: #fff; background: rgba(255,255,255,0.18);
                                          border-color: rgba(255,255,255,0.26); }
   [data-theme="light"] .theme-btn      { background: rgba(255,255,255,0.18);
@@ -275,6 +276,11 @@
   .app-title { font-size: 12px; font-weight: 700; letter-spacing: 4px;
                text-transform: uppercase; color: var(--text-dim); }
   .app-title b { color: var(--accent); }
+  /* Версия сразу за названием: margin-right: auto забирает свободное место
+     себе, и space-between шапки не ставит её посередине. */
+  .fw-info { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+             margin-right: auto; }
+  .fw-info:empty { display: none; }   /* до первого кадра — без пустой строки на телефоне */
   .host-chip { font-family: var(--font-mono); font-size: 11px;
                color: var(--accent); background: var(--accent-soft);
                border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
@@ -659,6 +665,11 @@
   }
   @media (max-width: 720px) {
     .metric-grid { grid-template-columns: 1fr; }
+    /* Шапка в одну строку — ~660px: название ~130, версия с «-dirty» ~300,
+       адрес с кнопкой темы ~170, плюс зазоры и поля. Уже — версия отдельной
+       строкой под шапкой, а название с адресом остаются на первой; без этого
+       перенос отрывал бы адрес от названия на телефоне. */
+    .fw-info { order: 3; flex-basis: 100%; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, .card { animation: none !important; transition: none !important; }
@@ -671,6 +682,7 @@
 
   <div class="app-header">
     <div class="app-title">ESP32 <b>CLOCK</b></div>
+    <div class="fw-info" id="fw-info"></div>
     <div class="header-side">
       <div class="host-chip" id="host-chip">—</div>
       <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
@@ -1857,6 +1869,9 @@
     document.getElementById('date').textContent         = d.date;
     document.getElementById('day').textContent          = d.day;
     document.getElementById('uptime-label').textContent = d.uptime;
+    if (d.fw_version !== undefined)
+      document.getElementById('fw-info').textContent =
+        'firmware ' + d.fw_version + ' · built ' + d.fw_built;
     document.getElementById('ssid').textContent         = d.ssid;
     document.getElementById('ip').textContent           = d.ip;
     document.getElementById('clients-val').textContent  = d.clients;
