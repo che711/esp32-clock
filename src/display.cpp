@@ -399,16 +399,30 @@ void displayDraw() {
         // Разделитель привязан к часам, а не к температуре: иначе дёргался бы
         // при смене её ширины.
         int xClock = 256 - CLOCK_MARGIN - clockW;
-        int xSep   = xClock - SEP_GAP;
+        int digitL = xClock + u8g2.getXOffsetGlyph('0');   // левый пиксель «0» и «2»
 
         int x = xClock;
         u8g2.drawStr(x, 50, hh);  x += dw + gap;
         u8g2.drawStr(x, 50, ":"); x += cw + gap;
         u8g2.drawStr(x, 50, mm);
 
-        u8g2.drawVLine(xSep, 4, 46);     // разделитель на всю высоту цифр
+        // Поле температуры отмеряется от часов, а не от черты: черта ниже
+        // сдвинута ради вида, а цифры должны стоять где стояли.
+        int leftW = xClock - 2 * SEP_GAP - CLOCK_MARGIN;
+        int avail = leftW - DEGREE_W;
 
-        int leftW = xSep - SEP_GAP - CLOCK_MARGIN;
+        // Черта — посередине между правым краем кружка ° у «XX.X» от 20° и
+        // левым краем «0»/«2» часов: 86 и 111 → x=98, пустых столбцов 11 и 12
+        // (сумма нечётная, ровнее не выйдет). Раньше стояла на xClock − SEP_GAP
+        // = 100: при 23.7 слева 13 пустых против 10 справа.
+        // При 10.0–19.9 кружок на 3px правее (u8g2 включает в ширину строки
+        // пустое поле слева у узкой «1»), там будет 8 и 12 — черта выставлена
+        // под обычную комнатную температуру, а не под этот случай.
+        u8g2.setFont(u8g2_font_logisoso32_tr);
+        int refW = u8g2.getStrWidth("20.0");
+        int degR = CLOCK_MARGIN + (avail - refW) / 2 + refW + 4 + 3;   // центр ° + радиус, как в drawCircle ниже
+        int xSep = (degR + digitL) / 2;
+        u8g2.drawVLine(xSep, 4, 46);     // разделитель на всю высоту цифр
 
         if (battery.valid && battery.percent <= BATTERY_CRITICAL_PCT) {
             // Заряд на исходе — вместо погоды предупреждение, а ниже
@@ -421,7 +435,6 @@ void displayDraw() {
             char tstr[8];
             displayTempText(tstr, sizeof(tstr));
 
-            int avail = leftW - DEGREE_W;
             int th = 32;
             u8g2.setFont(u8g2_font_logisoso32_tr);
             int tw = u8g2.getStrWidth(tstr);
