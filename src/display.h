@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 
 // ============================================================
@@ -29,3 +30,7 @@ void displaySetAutoScale(uint8_t pct); // масштаб авто-яркости
 
 uint8_t     displayLevel();           // текущий уровень шкалы 0..255
 const char* displayBrightnessLabel(); // "Night" / "Day" / "Manual" …
+
+// Температура так, как её пишет крупное поле экрана: "25.0" или "--".
+// Работает и без панели — её строку берёт снимок для дашборда.
+void displayTempText(char* buf, size_t sz);

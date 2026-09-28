@@ -773,6 +773,27 @@
     <div class="bright-block">
       <div class="bright-top">
         <div class="bright-left">
+          <div class="tile-label">Display brightness</div>
+          <span class="level-chip" id="bright-label">—</span>
+        </div>
+        <div class="seg">
+          <button class="mode-btn active" id="btn-auto"   onclick="setBrightnessMode('auto')">Auto</button>
+          <button class="mode-btn"        id="btn-manual" onclick="setBrightnessMode('manual')">Manual</button>
+        </div>
+      </div>
+      <div class="slider-row">
+        <span class="slider-ico">🌑</span>
+        <input type="range" id="brightness-slider" min="0" max="100" value="50"
+               class="auto-slider"
+               oninput="onSliderInput(this.value)" onchange="sendBrightness(this.value)">
+        <span class="slider-ico">☀️</span>
+        <span class="bright-val"><span id="brightness-pct">—</span>%</span>
+      </div>
+    </div>
+
+    <div class="bright-block">
+      <div class="bright-top">
+        <div class="bright-left">
           <div class="tile-label">Power saving</div>
           <span class="level-chip" id="pm-label">—</span>
         </div>
@@ -786,6 +807,8 @@
 
     <div class="btn-row">
       <button class="btn-action btn-power on" id="btn-power" onclick="togglePower()">⏻ Display on</button>
+      <button class="btn-action" onclick="resetStats()">Reset min/max</button>
+      <button class="btn-action btn-reboot" id="btn-reboot" onclick="doReboot()">Reboot</button>
     </div>
   </div>
 
@@ -853,32 +876,9 @@
       </div>
     </div>
 
-    <div class="bright-block">
-      <div class="bright-top">
-        <div class="bright-left">
-          <div class="tile-label">Display brightness</div>
-          <span class="level-chip" id="bright-label">—</span>
-        </div>
-        <div class="seg">
-          <button class="mode-btn active" id="btn-auto"   onclick="setBrightnessMode('auto')">Auto</button>
-          <button class="mode-btn"        id="btn-manual" onclick="setBrightnessMode('manual')">Manual</button>
-        </div>
-      </div>
-      <div class="slider-row">
-        <span class="slider-ico">🌑</span>
-        <input type="range" id="brightness-slider" min="0" max="100" value="50"
-               class="auto-slider"
-               oninput="onSliderInput(this.value)" onchange="sendBrightness(this.value)">
-        <span class="slider-ico">☀️</span>
-        <span class="bright-val"><span id="brightness-pct">—</span>%</span>
-      </div>
-    </div>
-
     <div class="btn-row">
       <button class="btn-action" onclick="exportCsv()">Export CSV</button>
       <button class="btn-action" onclick="exportJson()">Export JSON</button>
-      <button class="btn-action" onclick="resetStats()">Reset min/max</button>
-      <button class="btn-action btn-reboot" id="btn-reboot" onclick="doReboot()">Reboot</button>
     </div>
   </div>
 
@@ -955,7 +955,7 @@
         <button class="curl-copy" onclick="copyCmd('curl-reboot',this)">copy</button>
       </div>
     </div>
-    <div class="curl-note"># WebSocket ws://&lt;IP&gt;:81 — stopwatch: send text "sw:start" / "sw:pause" / "sw:reset"</div>
+    <div class="curl-note"># WebSocket ws://&lt;IP&gt;/ws — stopwatch: send text "sw:start" / "sw:pause" / "sw:reset"</div>
   </div>
 
   <!-- ── Chip info ── -->
@@ -1656,7 +1656,8 @@
     clearTimeout(wsReconnectTimer);   // реконнект мог уже стоять в очереди
     swServerSynced = false;   // при новом коннекте заново берём состояние секундомера
     setWsStatus(false);       // пока не подключились — кнопки заблокированы
-    const sock = new WebSocket('ws://' + location.hostname + ':81/');
+    // Тот же порт, что у страницы: WebSocket живёт в том же сервере на /ws.
+    const sock = new WebSocket('ws://' + location.host + '/ws');
     ws = sock;
     sock.onopen    = () => {
       if (sock !== ws) { sock.close(); return; }
@@ -1863,7 +1864,12 @@
 
     // ── Метрики BMP280 ──
     if (d.bmp_valid) {
-      document.getElementById('mt-val').textContent = tempTxt(d.bmp_temp);
+      // Главное число — строкой с экрана часов, а не своим округлением
+      // bmp_temp: в снимке он с сотыми, и второе округление расходилось с
+      // экраном на десятую (25.05 → 25.1 при 25.0 на часах). В °F экрану
+      // сравнивать не с чем — там пересчёт, как и раньше.
+      document.getElementById('mt-val').textContent =
+        (!isFahrenheit && d.bmp_temp_disp) ? d.bmp_temp_disp : tempTxt(d.bmp_temp);
       document.getElementById('mt-min').textContent = tempTxt(stats.temp.min);
       document.getElementById('mt-avg').textContent = tempTxt(avg(stats.temp));
       document.getElementById('mt-max').textContent = tempTxt(stats.temp.max);

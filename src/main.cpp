@@ -1,18 +1,23 @@
 #include <Arduino.h>
-#include <WiFi.h>
 #include <time.h>
+#include <sys/time.h>
 #include "config.h"
 #include "app.h"
+#include "clock_utils.h"
 #include "display.h"
 #include "web_api.h"
 #include "sensor.h"
 #include "battery.h"
 #include "power.h"
+#include "net.h"
 #include "mqtt.h"
+#include "schedule_calc.h"
+#include "screen_calc.h"
 
 // ============================================================
-//  main.cpp — жизненный цикл устройства: сеть, время, датчики
-//  и главный цикл. Экран — в display.cpp, веб — в web_api.cpp.
+//  main.cpp — жизненный цикл устройства: время, датчики, экран
+//  по расписанию и главный цикл. Экран — в display.cpp, веб —
+//  в web_api.cpp, сеть — в net.cpp.
 // ============================================================
 
 // ── Общее состояние (объявлено в app.h) ──────────────────
@@ -28,6 +33,21 @@ char   dayFullBuf[12];
 bool   timeSynced = false;
 String localIP    = "";
 
+// Замок состояния (app.h). Создаётся первым делом в setup() — до того, как
+// поднимется веб-сервер, которому он нужен.
+static SemaphoreHandle_t appMutex = nullptr;
+void appLock()   { xSemaphoreTake(appMutex, portMAX_DELAY); }
+void appUnlock() { xSemaphoreGive(appMutex); }
+
+// Будильник паузы в конце loop(). В простое цикл спит до смены секунды
+// (LOOP_IDLE_MS в config.h), и команда секундомера, пришедшая посреди этой
+// паузы, увидела бы экран только на следующей секунде: старт — с опозданием
+// до секунды, маркер паузы — тоже. Поэтому команды будят цикл сами.
+// Семафор, а не уведомление задачи: слот уведомлений у loopTask один, и его
+// может ждать какой-нибудь вызов ядра — наш сигнал оборвал бы чужое ожидание.
+static SemaphoreHandle_t loopWake = nullptr;
+static void wakeLoop() { if (loopWake) xSemaphoreGive(loopWake); }
+
 // Поправка на тепло панели (BMP280_SCREEN_HEAT_C в config.h). Берётся по
 // состоянию экрана в момент замера. HAS_DISPLAY проверяется отдельно: без
 // подпаянной панели displayIsOn() всё равно отвечает «горит», а греть
@@ -40,19 +60,16 @@ static float sensorTempOffset() {
 // Копить её из broadcast-кадров нельзя: те уходят раз в секунду и минуту
 // подряд несут одно и то же число, из чего график получался ступенчатым.
 static void historyPush(uint32_t nowMs) {
-    // 5-й аргумент — бывшая высота. Она теперь константа (HOME_ALTITUDE_M),
-    // дашборд её не рисует и /api/history не отдаёт; колонка в TrendSample
-    // осталась только потому, что её выпиливание тянет правку теста.
     // Напряжение банки едет в той же точке: это единственный журнал разряда,
     // который переживает закрытую вкладку, и из него же берётся кривая для
     // замера реальной ёмкости окна (BATTERY_USABLE_MAH в config.h).
     trendHistory.push(nowMs, weather.valid, weather.temperature,
-                      weather.pressure, HOME_ALTITUDE_M, weather.pressureTrend,
+                      weather.pressure, weather.pressureTrend,
                       battery.valid ? battery.voltage : NAN);
 }
 
-static uint32_t lastSensorMs  = 0;
-static int      lastSensorMin = -1;   // минута последнего замера, -1 — ещё не мерили
+// Когда в следующий раз мерить (schedule_calc.h)
+static SensorClock sensorClock;
 
 // Взводится, когда кадр надо перерисовать не дожидаясь смены секунды
 static bool     forceRedraw  = false;
@@ -78,15 +95,32 @@ static bool localTimeNow(struct tm* t) {
     return localTimeNow(t, time(nullptr));
 }
 
-// WS2812 на GPIO8: pinMode НЕ вызывать — сломает RMT адресного LED
+// WS2812 на GPIO8: pinMode, пока нога отдана RMT, НЕ вызывать — сломает RMT
+// адресного LED. После rmtDeinit() — можно, см. ledColor().
 //
 // Что горит прямо сейчас, помним сами: прочитать состояние адресного диода
 // нечем, а гасить его вслепую на каждом обороте loop() — это лишняя посылка
-// по RMT двадцать раз в секунду там, где гасить обычно нечего.
+// по RMT там, где гасить обычно нечего.
 static bool ledOn = false;
 
 static void ledColor(uint8_t r, uint8_t g, uint8_t b) {
     rgbLedWrite(LED_PIN, r, g, b);
+#if CONFIG_PM_ENABLE
+    // Канал RMT после записи отпускаем. Ядро включает его на первом
+    // rgbLedWrite() и больше не выключает, а включённый канал держит PM-замок
+    // ESP_PM_CPU_FREQ_MAX (esp_driver_rmt, rmt_common.c). Light sleep тогда
+    // не наступал бы никогда — с первой же вспышки синего в setup(), и весь
+    // PM молча стоял бы без дела.
+    //
+    // Цвет WS2812 держит сам. Ногу вместо RMT держим низким уровнем: в воздухе
+    // на ней ловились бы помехи, которые диод прочтёт как данные. Следующий
+    // rgbLedWrite() заберёт её у GPIO сам — rmtInit() начинает с отвязки.
+    // Цена — заново заводить канал на каждую запись, а записей здесь
+    // единицы в минуту.
+    rmtDeinit(LED_PIN);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+#endif
     ledOn = (r || g || b);
 }
 
@@ -110,35 +144,10 @@ float dieTempC() {
 }
 
 // ─── Яркость и расписание экрана ─────────────────────────
-// В эконом-режимах вне рабочего окна панель гасится совсем: это самая
-// крупная статья расхода, и ночью она всё равно никому не светит.
-// Ручное выключение из дашборда живёт до ближайшего открытия окна: утром
-// панель зажигается сама, чем бы её ни погасили.
-//
-// Раньше здесь стоял флаг «погасили мы сами», и взводился он только если в
-// момент закрытия окна панель горела. Выключенный кнопкой днём экран проходил
-// границу 22:00 незамеченным, и в 6:00 включать было нечего — часы оставались
-// тёмными до следующего нажатия. Состояние панели о намерении пользователя не
-// говорит ничего, граница окна — говорит, поэтому помним её, а не панель.
-static bool screenAllowedPrev = true;   // окно на прошлом заходе; true — на старте фронта нет
-
-// Ночью посмотреть на часы всё-таки надо, поэтому команда «включить экран»
-// работает и в запрещённый час — но не навсегда: держим панель
-// POWER_SCREEN_PEEK_MS и гасим сами. Забыть выключить легко, а расплата за
-// забытый экран — самый крупный потребитель, горящий до утра.
-static uint32_t screenPeekUntil = 0;      // 0 — подсветки нет
-
-// Сравнение через знаковую разность, а не «now < until»: так подсветка
-// переживает переполнение millis() на 49-м дне работы.
-static bool screenPeekActive(uint32_t now) {
-    if (screenPeekUntil == 0) return false;
-    if ((int32_t)(now - screenPeekUntil) >= 0) {
-        screenPeekUntil = 0;
-        Serial.println("Display: night peek expired");
-        return false;
-    }
-    return true;
-}
+// Когда панели гореть, решает ScreenSchedule (screen_calc.h): окно по часу,
+// ночная подсветка на POWER_SCREEN_PEEK_MS и рубеж по заряду. Здесь — только
+// исполнение: панель, яркость и строки в журнал.
+static ScreenSchedule screen;
 
 // Час известен — ставим уровень по расписанию, нет — уровень «времени нет».
 // В ручном режиме обе функции внутри ничего не делают.
@@ -160,94 +169,52 @@ void applyAutoBrightness() {
     // Две причины гасить экран, и подсветка вправе перебить только одну.
     bool battOk  = powerScreenBatteryOkNow();
     bool schedOk = !haveHour || powerScreenScheduleAllowsNow(hour);
-    bool allowed = battOk && schedOk;
 
-    // Фронт открытия окна считаем здесь, до раннего выхода по подсветке:
-    // иначе ночное «посмотреть на часы» съедало бы переход, и утро для экрана
-    // не наступало бы вовсе.
-    bool windowOpened = allowed && !screenAllowedPrev;
-    screenAllowedPrev = allowed;
-
-    // Пока идёт подсветка, расписание уступает — но только оно: рубеж по заряду
-    // подсветка не перебивает. Полминуты OLED на исходе банки это не только
-    // лишние миллиампер-часы, но и просадка напряжения, из-за которой чип уходит
-    // в brownout, — часы не «покажут время напоследок», а выключатся совсем.
-    // Истечёт окно — и ближайший же заход погасит панель обычным путём.
-    if (!allowed && battOk && screenPeekActive(millis())) {
-        applyAutoLevelFor(haveHour, hour);
-        return;
-    }
-
-    // Час стал рабочим — подсветку снимаем: экран и так горит по расписанию,
-    // а оставленный отсчёт врал бы в дашборде про скорое гашение.
-    if (allowed) screenPeekUntil = 0;
-
-    if (!allowed) {
-        if (displayIsOn()) displaySetPower(false);
-    } else if (windowOpened && !displayIsOn()) {
-        displaySetPower(true);
-    }
+    ScreenStep s = screen.tick(millis(), battOk, schedOk, displayIsOn());
+    if (s.peekExpired)                  Serial.println("Display: night peek expired");
+    if (s.action == SCREEN_TURN_OFF)    displaySetPower(false);
+    else if (s.action == SCREEN_TURN_ON) displaySetPower(true);
 
     applyAutoLevelFor(haveHour, hour);
 }
 
-// Сколько ещё гореть по подсветке, секунды; 0 — подсветки нет. Нужно
-// дашборду: без обратного отсчёта самопроизвольное гашение через полминуты
-// выглядит сбоем, а не задумкой.
-uint32_t screenPeekLeftS() {
-    if (screenPeekUntil == 0) return 0;
-    int32_t left = (int32_t)(screenPeekUntil - millis());   // знаковая: см. выше
-    if (left <= 0) return 0;
-    return ((uint32_t)left + 999) / 1000;                   // вверх, до целых секунд
-}
+uint32_t screenPeekLeftS() { return screen.peekLeftS(millis()); }
 
 // Команда питания экрана из дашборда. Отдельно от displaySetPower(), потому
 // что кроме самой панели трогает расписание: включение в запрещённый час
 // заводит подсветку, выключение снимает её досрочно.
 //
-// Возвращает причину отказа или nullptr, если команда выполнена. Причина, а не
-// просто «не вышло»: отказать включению могут по двум разным поводам, и совет
-// пользователю у них противоположный — подождать зарядки или поднять ползунок.
+// Возвращает причину отказа или nullptr, если команда выполнена (почему
+// причина, а не просто «не вышло» — у ScreenRefusal). Отказ виден снаружи и
+// так: display_on в ответе и в снимке — фактическое состояние панели, а не
+// то, что попросили.
 const char* screenSetPower(bool on) {
     if (!on) {
         displaySetPower(false);
-        screenPeekUntil = 0;         // погасили сами — досматривать нечего
+        screen.requestOff();
         return nullptr;
     }
 
-    // Рубеж по заряду не обходится ничем, в том числе этой командой: иначе
-    // подсветка сводила бы его на нет — зажгли на полминуты, и она же уронила
-    // устройство в brownout. Часа для проверки не нужно, поэтому она работает
-    // и без синхронизации времени. Отказ виден снаружи: display_on в ответе и
-    // в снимке — фактическое состояние панели, а не то, что попросили.
-    if (!powerScreenBatteryOkNow()) {
-        screenPeekUntil = 0;
+    struct tm t;
+    bool nightNow = timeSynced && localTimeNow(&t)
+                 && !powerScreenScheduleAllowsNow(t.tm_hour);
+
+    switch (screen.requestOn(millis(), powerScreenBatteryOkNow(),
+                             displayLevel() == 0, nightNow, POWER_SCREEN_PEEK_MS)) {
+    case SCREEN_REFUSED_BATTERY:
         Serial.println("Display: ON refused, battery critical");
         return "battery";
-    }
-
-    // Яркость на нуле — панель не засветится, чем её ни включай: ноль гасит её
-    // через power save, а не притушивает (см. refreshPanel). Поднять уровень
-    // самим было бы проще всего, и раньше так и делалось, — но это молча
-    // отменяет выбор пользователя и разводит дашборд с железом: ползунок
-    // остаётся в нуле, панель светит на 28 %. Пусть лучше команда честно не
-    // выполнится, а причина доедет до журнала.
-    if (displayLevel() == 0) {
+    case SCREEN_REFUSED_BRIGHTNESS:
         Serial.println("Display: ON refused, brightness is 0");
         return "brightness";
+    case SCREEN_REFUSED_NONE:
+        break;
     }
 
     displaySetPower(true);
-
-    struct tm t;
-    if (timeSynced && localTimeNow(&t) && !powerScreenScheduleAllowsNow(t.tm_hour)) {
-        screenPeekUntil = millis() + POWER_SCREEN_PEEK_MS;
-        if (screenPeekUntil == 0) screenPeekUntil = 1;   // 0 занят под «нет подсветки»
+    if (screen.peeking())
         Serial.printf("Display: night peek %lus\n",
                       (unsigned long)(POWER_SCREEN_PEEK_MS / 1000));
-    } else {
-        screenPeekUntil = 0;         // час рабочий — гасить по таймеру незачем
-    }
     return nullptr;
 }
 
@@ -283,8 +250,7 @@ static void deepSleepNow(const char* why) {
 // Полный путь: гасим то, что успели поднять, и засыпаем.
 static void sleepUntilCharged() {
     screenSetPower(false);
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    netShutdown();
     deepSleepNow("банка пуста");
 }
 
@@ -292,19 +258,18 @@ static void sleepUntilCharged() {
 // должен стоить пяти минут темноты. Ноль на пустом месте маловероятен —
 // медиана набора и сглаживание его давят, — но цена ошибки тут велика.
 static void checkBatteryEmpty() {
-    static uint32_t emptySince = 0;
-
-    if (!powerShouldSleep(battery.percent, battery.valid, POWER_SLEEP_PCT)) {
-        emptySince = 0;
-        return;
-    }
-    uint32_t now = millis();
-    if (emptySince == 0) {
-        emptySince = now ? now : 1;
+    static HoldTimer empty;
+    bool zero = powerShouldSleep(battery.percent, battery.valid, POWER_SLEEP_PCT);
+    switch (empty.step(zero, millis(), POWER_SLEEP_CONFIRM_MS)) {
+    case HoldTimer::STARTED:
         Serial.println("[Battery] ноль шкалы, подтверждаем...");
-        return;
+        break;
+    case HoldTimer::ELAPSED:
+        sleepUntilCharged();
+        break;
+    case HoldTimer::NONE:
+        break;
     }
-    if (now - emptySince >= POWER_SLEEP_CONFIRM_MS) sleepUntilCharged();
 }
 
 // ─── Секундомер: команды ─────────────────────────────────
@@ -312,6 +277,9 @@ static void checkBatteryEmpty() {
 // ради отзывчивости кнопок, на паузе и в простое — по профилю. Раньше здесь
 // жила своя копия этого выбора (setRadioSaving), и две копии расходились:
 // переподключение посреди паузы оставляло радио не в той глубине.
+//
+// Все три вызываются из задачи веб-сервера и будят loop(): иначе замер начал
+// бы тикать на экране только со следующей секунды.
 
 void swStart() {
     if (stopwatch.start(millis())) {
@@ -336,6 +304,7 @@ void swStart() {
         // через полминуты посреди отсчёта.
         powerLoop();
         screenSetPower(true);
+        wakeLoop();
 
         Serial.println("Stopwatch START");
     }
@@ -345,6 +314,7 @@ void swPause() {
     if (stopwatch.pause(millis())) {
         forceRedraw = true;             // маркер «II» — сразу, а не со сменой секунды
         powerApplyRadio();              // счётчик заморожен, торопиться некуда
+        wakeLoop();
         Serial.println("Stopwatch PAUSE");
     }
 }
@@ -354,145 +324,8 @@ void swReset() {
     forceRedraw = true;                 // вернуть часы на экран сразу, а не через секунду
     displayInvalidateStopwatch();
     powerApplyRadio();
+    wakeLoop();
     Serial.println("Stopwatch RESET");
-}
-
-// ─── WiFi + NTP ───────────────────────────────────────────
-//
-//  Подключение — автомат, а не цикл с delay() внутри. Ассоциация занимает
-//  секунды, а из loop() она вызывается на возврате из выживания: пока
-//  connectWifi() крутил свои 30 × delay(500), вставало всё — часы, секундомер,
-//  веб и опрос датчика, до пятнадцати секунд разом.
-//
-//  Наружу торчат два вызова: wifiBeginConnect() начинает, wifiConnectStep()
-//  двигает на один шаг и говорит, закончилось ли. Вся работа «после связи»
-//  собрана в wifiOnConnected(), чтобы не разъезжалась между путями.
-static bool     wifiConnecting   = false;
-static uint32_t wifiConnectStart = 0;
-static uint32_t wifiDotMs        = 0;   // ритм точек в логе, раз в 500 мс
-// Отработала ли wifiOnConnected() для текущей ассоциации. Связь поднимается не
-// только через автомат: setAutoReconnect(true) и WiFi.reconnect() возвращают её
-// сами, мимо него. Без этого признака после такого возврата не было бы ни
-// нового localIP, ни настроек радио под профиль.
-static bool     wifiReady        = false;
-
-// Момент последнего запуска SNTP. Общий для setup() и maintainNetwork(),
-// чтобы ретрай отсчитывался от старта, а не от первого захода в цикл.
-static uint32_t lastNtpMs = 0;
-
-// Поднимает SNTP-демона и задаёт TZ-правило (DST считается автоматически).
-// Вызывается и без связи: TZ должен быть установлен в любом случае, а демон
-// сам ретраит запрос, когда сеть появится.
-static void startNTP() {
-    configTzTime(TZ_INFO, NTP_SERVER);
-    lastNtpMs = millis();
-}
-
-static void wifiOnConnected() {
-    wifiReady = true;
-    localIP = WiFi.localIP().toString();
-    Serial.printf("\nIP: %s\n", localIP.c_str());
-    // Мощность и глубина сна — под режим и секундомер. Старт STA в ядре
-    // Arduino сбрасывает сон на MIN_MODEM, так что без этого вызова радио
-    // после переподключения работало бы не в своей глубине.
-    powerApplyRadio();
-    // mDNS (clock.local) здесь больше не поднимается: в сети он так и не
-    // заработал, а раз часы открывают только по IP, то и адрес ответчика
-    // незачем. IP виден в нижней строке экрана.
-    // Время — сразу, как появилась связь. SNTP запущен ещё в setup(), но без
-    // сети его запрос ушёл в никуда, а повтора ждать долго: наш в
-    // maintainNetwork() случится только через NTP_RETRY_MS, и всё это время на
-    // экране прочерки. Пока setup() ждал связь, вызов был не нужен: SNTP
-    // стартовал уже после подключения. На реконнекте запрос лишний — один пакет.
-    startNTP();
-}
-
-static void wifiBeginConnect() {
-    Serial.printf("Connecting to %s", WIFI_SSID);
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    // begin() без подключения: он переписывает конфиг STA целиком, и
-    // listen_interval надо вписать после него, но до ассоциации —
-    // позже точка доступа его не узнает (см. powerPrepareAssociation).
-    // Переподключения, свои и авто, берут конфиг уже с ним.
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, 0, nullptr, false);
-    powerPrepareAssociation();
-    WiFi.reconnect();              // без связи это просто esp_wifi_connect()
-    wifiConnecting   = true;
-    wifiReady        = false;
-    wifiConnectStart = millis();
-    wifiDotMs        = wifiConnectStart;
-}
-
-// true — подключение больше не в процессе: либо связь есть, либо вышло время.
-// Промах не страшен: дальше связь поднимает авто-реконнект ядра, а если и он
-// не справится — запасной WiFi.reconnect() из maintainNetwork().
-static bool wifiConnectStep(uint32_t now) {
-    if (!wifiConnecting) return true;
-
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiConnecting = false;
-        wifiOnConnected();
-        return true;
-    }
-    if (now - wifiDotMs >= 500) { wifiDotMs = now; Serial.print("."); }
-    if (now - wifiConnectStart >= WIFI_CONNECT_TIMEOUT_MS) {
-        wifiConnecting = false;
-        Serial.println("\nWiFi FAILED");
-        return true;
-    }
-    return false;
-}
-
-// Поддержание сети: реконнект + периодический ре-синк NTP
-static void maintainNetwork() {
-    static uint32_t lastCheck = 0;
-    uint32_t now = millis();
-
-    // Пока идёт ассоциация — только двигаем автомат. Проверять связь и
-    // ре-синкать NTP посреди подключения нечего.
-    if (wifiConnecting) { wifiConnectStep(now); return; }
-
-    if (now - lastCheck >= 10000) {          // проверка связи раз в 10 с
-        // Когда начался текущий обрыв (или случился наш последний reconnect);
-        // 0 — связь есть.
-        static uint32_t lostSince = 0;
-        lastCheck = now;
-        if (WiFi.status() != WL_CONNECTED) {
-            wifiReady = false;
-            // Свой reconnect — только запасной путь. На обрыв первым отвечает
-            // авто-реконнект ядра, и раньше мы дёргали reconnect() поверх него
-            // каждые 10 с: esp_wifi_connect() посреди его ассоциации начинал
-            // её заново, и при слабом сигнале связь могла не встать никогда.
-            // Но ядро повторяет не всё — например, AUTH_FAIL после первого
-            // подключения оно не ретраит, — поэтому совсем без нас нельзя.
-            // Ждём столько же, сколько отводим на одну ассоциацию.
-            if (lostSince == 0) {
-                lostSince = now ? now : 1;
-                Serial.println("WiFi lost, auto-reconnect is on it");
-            } else if (now - lostSince >= WIFI_CONNECT_TIMEOUT_MS) {
-                lostSince = now ? now : 1;
-                Serial.println("WiFi still down -> reconnect");
-                WiFi.reconnect();
-            }
-        } else {
-            lostSince = 0;
-            // Связь вернулась мимо автомата — авто-реконнектом стека или
-            // предыдущим WiFi.reconnect(). Доводим её до конца тем же путём.
-            if (!wifiReady) wifiOnConnected();
-        }
-        String ip = WiFi.localIP().toString();
-        if (ip != localIP) localIP = ip;
-    }
-    // Только ретрай, пока часы не встали. Плановый ресинк раньше стоял здесь
-    // же, раз в 6 ч, но был пустым: демон SNTP и сам переспрашивает сервер
-    // каждые CONFIG_LWIP_SNTP_UPDATE_DELAY (3 ч в сборке ядра), а наш вызов
-    // лишь перезапускал его.
-    if (!timeSynced && WiFi.status() == WL_CONNECTED
-        && now - lastNtpMs >= NTP_RETRY_MS) {
-        Serial.println("NTP retry");
-        startNTP();
-    }
 }
 
 static bool updateTimeStrings() {
@@ -517,10 +350,12 @@ static bool updateTimeStrings() {
     }
 
     if (ok) {
-        snprintf(timeBuf,     sizeof(timeBuf),
-                 "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
-        snprintf(dateBuf,     sizeof(dateBuf),
-                 "%02d %s %04d", t.tm_mday, MONTHS[t.tm_mon], t.tm_year + 1900);
+        // Форматы — те, что покрыты тестами (clock_utils.h). Раньше здесь
+        // стояли свои копии snprintf, и тесты проверяли код, который прошивка
+        // не вызывала.
+        formatTime(t.tm_hour, t.tm_min, t.tm_sec, timeBuf, sizeof(timeBuf));
+        formatDate(t.tm_mday, MONTHS[t.tm_mon], t.tm_year + 1900,
+                   dateBuf, sizeof(dateBuf));
         snprintf(dayShortBuf, sizeof(dayShortBuf), "%s", DAYS_SHORT[t.tm_wday]);
         snprintf(dayFullBuf,  sizeof(dayFullBuf),  "%s", DAYS_FULL[t.tm_wday]);
     } else {
@@ -533,7 +368,10 @@ static bool updateTimeStrings() {
 }
 
 // ─── Метео: опрос датчика + индикация LED ────────────────
-// Мигок LED без delay(): гасим на следующих итерациях loop().
+// Мигок LED без delay(): гасим на следующих итерациях loop(). Длительность
+// нужна и паузе цикла: в простое он спит до смены секунды, и без неё мигок
+// растянулся бы до секунды.
+static const uint32_t LED_BLINK_MS = 30;
 static uint32_t ledBlinkStart = 0;
 static bool     ledBlinking   = false;
 
@@ -543,44 +381,16 @@ static void ledBlink(uint8_t r, uint8_t g, uint8_t b) {
     ledBlinking   = true;
 }
 
-// Пора ли опрашивать датчик. Замер привязан к началу минуты по часам, а не
-// к моменту включения: раньше интервал отсчитывался от millis() загрузки, и
-// показания обновлялись в произвольную секунду (12:34:17, 12:35:17 …).
-// Сравнить их с чем-то по времени было нельзя, а точки графика ложились
-// вразнобой относительно минут.
-static bool sensorDue(uint32_t nowMs) {
+// Минута по часам для SensorClock; -1 — часы не встали.
+static int clockMinute() {
     struct tm t;
-    if (!localTimeNow(&t)) {
-        // NTP ещё не ответил — минут у нас нет, работает прежний отсчёт
-        // от millis(). Иначе датчик молчал бы до синхронизации.
-        return nowMs - lastSensorMs >= powerSensorIntervalMs();
-    }
-    if (t.tm_min == lastSensorMin) return false;   // в эту минуту уже мерили
-
-    // Время только что появилось — на старте из RTC или с первым ответом NTP.
-    // Последний замер был по millis() (или в setup()) секунды назад, и мерить
-    // прямо сейчас значило бы положить в историю дубль посреди минуты. Ждём
-    // начала ближайшей подходящей минуты, как и дальше.
-    if (lastSensorMin < 0) {
-        lastSensorMin = t.tm_min;
-        return false;
-    }
-
-    // В экономе опрос раз в две минуты — берём чётные, чтобы момент замера
-    // не зависел от того, когда устройство включили. Ноль в делителе тут
-    // означал бы деление на ноль, поэтому шаг не опускается ниже минуты.
-    uint32_t everyMin = powerSensorIntervalMs() / 60000UL;
-    if (everyMin < 1) everyMin = 1;
-    if ((uint32_t)t.tm_min % everyMin != 0) return false;
-
-    lastSensorMin = t.tm_min;
-    return true;
+    return localTimeNow(&t) ? t.tm_min : -1;
 }
 
 static void updateWeather() {
     uint32_t now = millis();
 
-    if (ledBlinking && now - ledBlinkStart >= 30) {
+    if (ledBlinking && now - ledBlinkStart >= LED_BLINK_MS) {
         ledColor(0, 0, 0);
         ledBlinking = false;
     }
@@ -602,8 +412,7 @@ static void updateWeather() {
 
     // Погоду спрашиваем редко: температура и давление за минуту никуда
     // не убегут, а каждый опрос I²C — это работа шины и ядра.
-    if (sensorDue(now)) {
-        lastSensorMs = now;
+    if (sensorClock.due(now, clockMinute(), powerSensorIntervalMs())) {
         weather = sensorRead(sensorTempOffset());
         historyPush(now);
         // Вся индикация под профилем разом: в экономе она молчит, включая
@@ -620,6 +429,24 @@ static void updateWeather() {
             }
         }
     }
+}
+
+// Сколько спать в конце оборота loop(). На ходу секундомера — коротко, кадр
+// тикает 25 fps. В простое — до смены секунды (schedule_calc.h), но так,
+// чтобы не проспать конец мигка LED.
+static uint32_t loopPauseMs() {
+    if (stopwatch.running()) return LOOP_STOPWATCH_MS;
+
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    uint32_t pause = loopIdlePauseMs((uint32_t)(tv.tv_usec / 1000), LOOP_IDLE_MS);
+
+    if (ledBlinking) {
+        uint32_t lit  = millis() - ledBlinkStart;
+        uint32_t left = lit < LED_BLINK_MS ? LED_BLINK_MS - lit + 1 : 1;
+        if (left < pause) pause = left;
+    }
+    return pause;
 }
 
 // ── Причина последнего сброса ─────────────────────────────
@@ -681,6 +508,12 @@ static void bootSplash() {
 
 // ─────────────────────────────────────────────────────────
 void setup() {
+    // Весь setup() — под замком: обработчики веб-сервера ждут, пока старт
+    // не закончится, и не видят недособранного состояния.
+    appMutex = xSemaphoreCreateMutex();
+    loopWake = xSemaphoreCreateBinary();
+    appLock();
+
     Serial.begin(115200);
 #if ARDUINO_USB_CDC_ON_BOOT
     // Без этого write() в USB-CDC блокирует loop() на секунды,
@@ -759,21 +592,8 @@ void setup() {
     weather = sensorRead(sensorTempOffset());
     historyPush(millis());
 
-    // Связь и время в setup() не ждём — их доводит loop(): подключение крутит
-    // автомат в maintainNetwork(), время запрашивает wifiOnConnected().
-    //
-    // Раньше связь здесь прокачивалась на месте, а следом ещё до десяти секунд
-    // ждали NTP: «показывать всё равно нечего, на экране заставка». Показывать
-    // было нечего, но и отвечать тоже: веб-сервер поднимался только после обоих
-    // ожиданий, и в худшем случае часы выходили на связь через 15 с WiFi плюс
-    // 10 с NTP. Сильнее всего это било по кнопке RST: она стирает время в RTC,
-    // и ожидание NTP после неё шло всегда, а после паники проскакивало.
-    //
-    // wifiBeginConnect() первым: WiFi.mode() внутри поднимает сетевой стек,
-    // на котором стоят и SNTP, и оба сервера.
-    wifiBeginConnect();
-    startNTP();            // TZ нужен сразу: время могло пережить сброс в RTC
-    powerBegin();          // радио профиль получит в wifiOnConnected()
+    netBegin();            // первым: WiFi.mode() поднимает стек под SNTP и веб
+    powerBegin();          // радио профиль получит в wifiOnConnected() (net.cpp)
     webApiBegin();
 
 #if MQTT_ENABLED
@@ -786,14 +606,32 @@ void setup() {
     // синий первым же оборотом. Раньше его не снимал никто, и гас он только
     // на первом опросе датчика — через минуту-две, когда дашборд давно отвечал.
     ledColor(0, 0, 0);
+
+    // Сон — последним: все ноги, которые он должен оставить в покое, к этому
+    // моменту уже настроены, а стартовые delay() выше спят и без него.
+    powerEnableLightSleep();
+
+    // Сторожевой таймер на loop(). Ядро по умолчанию его не включает
+    // (loopTaskWDTEnabled = false), и проверка idle-задачи в сборке тоже
+    // выключена: зависни цикл на I²C или на замке — часы молча замерли бы до
+    // ручного сброса. Сам таймер в сборке уже заведён — 5 с и паника, — так
+    // что зависание кончится перезагрузкой с причиной «task watchdog», которую
+    // дашборд поднимает до warn. Самый долгий законный оборот — подключение к
+    // MQTT, до MQTT_CONNECT_TIMEOUT_MS + MQTT_SOCKET_TIMEOUT_S, то есть 3 с, —
+    // в эти 5 с укладывается. Включаем в конце: стартовые delay() и sensorInit()
+    // на мёртвой шине ему незачем.
+    enableLoopWDT();
+
+    appUnlock();
 }
 
 void loop() {
+    appLock();
     webApiLoop();
     batteryLoop();            // копит отсчёты АЦП по одному, без задержек
     checkBatteryEmpty();      // ноль шкалы -> deep sleep, дальше не возвращаемся
     powerLoop();              // уровень энергосбережения
-    maintainNetwork();
+    netLoop();
     updateWeather();          // BMP280 + батарея по таймеру + LED
 
     bool frameDue = updateTimeStrings() || forceRedraw;
@@ -828,9 +666,9 @@ void loop() {
         Serial.printf("[hb] up=%lus wifi=%s ip=%s rssi=%d heap=%u clients=%u "
                       "chip=%.1fC bmp=%.1fC p=%.0fhPa bat=%d%% v=%.2f adc=%umV pm=%s\n",
                       (unsigned long)(millis() / 1000),
-                      WiFi.status() == WL_CONNECTED ? "OK" : "DOWN",
+                      netConnected() ? "OK" : "DOWN",
                       localIP.length() ? localIP.c_str() : "-",
-                      (int)WiFi.RSSI(),
+                      netRssi(),
                       (unsigned)esp_get_free_heap_size(),
                       (unsigned)webApiClientCount(),
                       dieTempC(),
@@ -841,7 +679,10 @@ void loop() {
                       powerModeName());
     }
 
-    // Короткий цикл на ходу: иначе команда стоит в очереди до конца паузы
-    // и устройство стартует заметно позже браузера.
-    delay(stopwatch.running() ? LOOP_STOPWATCH_MS : LOOP_IDLE_MS);
+    // Пауза — окно для обработчиков веб-сервера: замок отпущен только на неё.
+    // Будит её конец отсчёта или wakeLoop() — команда, которой экран нужен
+    // сейчас, а не со следующей секундой.
+    const uint32_t pauseMs = loopPauseMs();
+    appUnlock();
+    xSemaphoreTake(loopWake, pdMS_TO_TICKS(pauseMs));
 }

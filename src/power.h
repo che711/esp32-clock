@@ -19,6 +19,10 @@
 void powerBegin();      // применить стартовый уровень, вызвать в setup()
 void powerLoop();       // поправка на секундомер, вызывать из loop()
 
+// Автоматический light sleep — в конце setup(), когда все ноги настроены.
+// В сборке без CONFIG_PM_ENABLE (custom_sdkconfig в platformio.ini) пуст.
+void powerEnableLightSleep();
+
 const char* powerModeName();      // что работает прямо сейчас
 PowerMode   powerChosenMode();    // что выбрано пользователем
 

@@ -73,9 +73,13 @@ light sleep нужен раньше, чем закончится переезд,
 2. **Нативные тесты вне PlatformIO.** Голый cmake + unity либо `idf.py
    --preview set-target linux`. Пока тесты не запускаются, дальше идти нельзя:
    без них переезд не проверить.
-3. **`web_api.cpp` — самый крупный кусок**, начинать с него: станет видно
-   цену остального. `WebServer` → `esp_http_server`, links2004/WebSockets →
-   встроенный в него WebSocket. Снимок JSON собирается тем же `snprintf`.
+3. **`web_api.cpp` — уже сделано, ещё в Arduino-сборке.** Сервер —
+   `esp_http_server` со встроенным WebSocket на `/ws`, links2004 убрана:
+   синхронный `WebServer` вешал страницу на секунды (README, «Грабли и
+   решения»). При переезде в нём остаётся заменить Arduino-обёртки:
+   `Serial`, `millis()`, `delay()`, `WiFi.RSSI()`, `String localIP`,
+   `ESP.restart()`, `ESP.getHeapSize()`. Замок состояния (`appLock()`) —
+   уже FreeRTOS и переезжает как есть.
 4. **Сеть в `main.cpp`:** `WiFi.h` → `esp_wifi` + `esp_netif`,
    `configTzTime` → `esp_netif_sntp`. mDNS не переносится: из прошивки он
    убран, доступ только по IPv4.
@@ -95,8 +99,6 @@ light sleep нужен раньше, чем закончится переезд,
 | Сейчас | В IDF |
 | --- | --- |
 | `WiFi.h` | `esp_wifi` + `esp_netif` |
-| `WebServer` | `esp_http_server` |
-| links2004/WebSockets | WebSocket внутри `esp_http_server` |
 | PubSubClient | `esp-mqtt` (`mqtt_client.h`) |
 | U8g2 | HAL-порт под IDF |
 | Adafruit BMP280 + Unified Sensor | свой драйвер на `i2c_master` |
@@ -104,6 +106,9 @@ light sleep нужен раньше, чем закончится переезд,
 | `rgbLedWrite()` | компонент `led_strip` (RMT) |
 | `millis()` | `esp_timer_get_time() / 1000` |
 | `setup()` / `loop()` | `app_main()` + задача цикла |
+
+`WebServer` и links2004/WebSockets из таблицы ушли: их заменил
+`esp_http_server` ещё до переезда (шаг 3).
 
 ## Приёмка
 

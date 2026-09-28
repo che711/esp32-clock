@@ -2,14 +2,15 @@
 #include <stdint.h>
 
 // ============================================================
-//  web_api.h — HTTP (:80) и WebSocket (:81).
+//  web_api.h — HTTP и WebSocket, оба на :80 (WebSocket — /ws).
 //
 //  Модуль отдаёт наружу состояние из app.h и принимает команды
-//  яркости, питания экрана и секундомера.
+//  яркости, питания экрана и секундомера. Сервер работает в своей
+//  задаче; состояние из app.h трогает только под appLock().
 // ============================================================
 
-void webApiBegin();       // маршруты + запуск обоих серверов
-void webApiLoop();        // обслуживание клиентов, вызывать из loop()
-void webApiBroadcast();   // разослать снимок состояния по WebSocket
+void webApiBegin();       // маршруты + запуск сервера
+void webApiLoop();        // heartbeat WebSocket, вызывать из loop()
+void webApiBroadcast();   // разослать снимок по WebSocket; вызывать под appLock()
 
 uint8_t  webApiClientCount();
