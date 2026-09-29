@@ -66,8 +66,19 @@ jobs:
           key: ${{ runner.os }}-pio-esp32-${{ hashFiles('platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-esp32-
 
+      # Ядро закрепляем в ~/.platformio/penv, а не в системном Python:
+      # гибридная сборка (custom_sdkconfig) после библиотек IDF запускает
+      # вложенный `pio run` из penv, а туда платформа ставит свой форк ядра
+      # `pioarduino>=6.1.19` без верхней границы. На свежем penv приезжал
+      # 6.2.0, и вложенная сборка падала на том же конфликте SCons, что
+      # описан в test, — пин в системном Python её не касался. Если в penv
+      # уже есть 6.1.19, платформа его не трогает. --clear — чтобы penv из
+      # кеша со старым ядром или другой версией Python не пережил пин.
       - name: Install PlatformIO
-        run: pip install platformio==6.1.19   # почему не свежее — в работе test
+        run: |
+          python3 -m venv --clear ~/.platformio/penv
+          ~/.platformio/penv/bin/pip install pioarduino==6.1.19
+          echo "$HOME/.platformio/penv/bin" >> "$GITHUB_PATH"
 
       - name: Build firmware
         run: pio run -e esp32c6
