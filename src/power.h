@@ -43,6 +43,7 @@ bool     powerLedEnabled();
 // заряду не обходится ничем (см. applyAutoBrightness/screenSetPower).
 bool     powerScreenBatteryOkNow();       // false — заряд на исходе, панель гасим
 bool     powerScreenScheduleAllowsNow(int hour);
+bool     powerScreenAutoOnNow();          // false — панель зажигает только кнопка
 
 // Радио сконфигурировать под текущий профиль и состояние секундомера:
 // мощность и глубину сна. Вызывать после подключения и на каждой смене

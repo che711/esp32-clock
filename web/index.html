@@ -1613,13 +1613,15 @@
   function pmHint(k) {
     const sc = pmSched;
     if (k === 'normal') {
-      return 'Screen always on' + (sc ? ', sensor every ' + everyTxt(sc.normalS) : '') +
+      return 'Screen on day and night; switched off, it comes back by itself' +
+             (sc ? ' at ' + hourTxt(sc.off) + ', sensor every ' + everyTxt(sc.normalS) : ' in the morning') +
              ', radio at full power. The stopwatch switches here on its own and hands the level back on reset.';
     }
     if (k === 'eco') {
       return 'Default level. Screen dimmed and off' +
-             (sc ? ' ' + hourTxt(sc.on) + '\u2013' + hourTxt(sc.off) + ', sensor every ' + everyTxt(sc.ecoS)
-                 : ' at night') +
+             (sc ? ' ' + hourTxt(sc.on) + '\u2013' + hourTxt(sc.off) : ' at night') +
+             ', then dark until you turn it on' +
+             (sc ? ', sensor every ' + everyTxt(sc.ecoS) : '') +
              ', radio sleeps longer between beacons.';
     }
     return '';

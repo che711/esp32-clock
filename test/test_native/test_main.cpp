@@ -664,6 +664,14 @@ void test_power_profile_tightens_with_level() {
     TEST_ASSERT_FALSE(powerProfile(POWER_NORMAL).screenWindow);
 }
 
+// Зажигать экран сам вправе только обычный уровень — в том числе поднятый
+// секундомером; эконом после ночи и после рубежа по заряду ждёт кнопки
+void test_power_profile_auto_on_only_in_normal() {
+    TEST_ASSERT_TRUE(powerProfile(POWER_NORMAL).screenAutoOn);
+    TEST_ASSERT_FALSE(powerProfile(POWER_ECO).screenAutoOn);
+    TEST_ASSERT_TRUE(powerProfile(powerEffectiveMode(POWER_ECO, true)).screenAutoOn);
+}
+
 void test_power_profile_bad_index_is_normal() {
     TEST_ASSERT_EQUAL_STRING("normal", powerProfile((PowerMode)99).name);
 }
@@ -838,54 +846,108 @@ void test_power_mode_from_name_rejects_removed_survival() {
 }
 
 // ─── Расписание экрана ────────────────────────────────────
+// Шаг расписания в двух режимах. Входы tick() — battOk, schedOk, dayOk,
+// autoOn, panelOn; у эконома окно и день совпадают, у обычного окна нет.
+static ScreenStep ecoTick(ScreenSchedule& sc, uint32_t ms, bool day, bool panel,
+                          bool batt = true) {
+    return sc.tick(ms, batt, day, day, false, panel);
+}
+static ScreenStep normalTick(ScreenSchedule& sc, uint32_t ms, bool day, bool panel,
+                             bool batt = true) {
+    return sc.tick(ms, batt, true, day, true, panel);
+}
+
 // Окно закрылось — горящую панель гасим
 void test_screen_window_close_turns_panel_off() {
     ScreenSchedule sc;
-    ScreenStep st = sc.tick(1000, true, false, true);
+    ScreenStep st = ecoTick(sc, 1000, false, true);
     TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, st.action);
     TEST_ASSERT_FALSE(st.peekExpired);
 }
 
-// На старте фронта нет: панель, погашенную до первого шага, окно само не
+// На старте фронта нет: панель, погашенную до первого шага, утро само не
 // зажигает — иначе любая перезагрузка днём отменяла бы ручное выключение
 void test_screen_no_edge_on_first_step() {
     ScreenSchedule sc;
-    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(1000, true, true, false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, normalTick(sc, 1000, true, false).action);
 }
 
-// Открытие окна зажигает панель один раз, на самом фронте, а не на каждом
-// шаге: иначе выключение кнопкой днём отменялось бы через секунду
-void test_screen_window_open_turns_on_once() {
+// Утро зажигает панель один раз, на самом фронте, а не на каждом шаге:
+// иначе выключение кнопкой днём отменялось бы через секунду
+void test_screen_normal_morning_turns_on_once() {
     ScreenSchedule sc;
-    sc.tick(1000, true, false, false);                                  // ночь
-    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, sc.tick(2000, true, true, false).action);
-    TEST_ASSERT_EQUAL(SCREEN_KEEP,    sc.tick(3000, true, true, false).action);
+    normalTick(sc, 1000, false, false);                              // ночь
+    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, normalTick(sc, 2000, true, false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP,    normalTick(sc, 3000, true, false).action);
 }
 
-// Тот самый случай, ради которого помнится граница окна, а не панель:
-// выключили кнопкой днём — утром экран обязан загореться сам
-void test_screen_manual_off_by_day_returns_next_morning() {
+// Воскресенье 4 октября: в обычном режиме выключили кнопкой — утром экран
+// обязан загореться сам. Окна у обычного режима нет, и раньше утро для него
+// не наступало вовсе
+void test_screen_normal_manual_off_returns_next_morning() {
     ScreenSchedule sc;
-    sc.tick(1000, true, true, true);                    // день, панель горит
+    normalTick(sc, 1000, true, true);                   // день, панель горит
     sc.requestOff();                                    // погасили из дашборда
-    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(2000, true, true,  false).action);
-    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(3000, true, false, false).action);  // 22:00
-    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, sc.tick(4000, true, true, false).action); // 6:00
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, normalTick(sc, 2000, true,  false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, normalTick(sc, 3000, false, false).action);  // 22:00
+    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, normalTick(sc, 4000, true, false).action); // 6:00
+}
+
+// Эконом ночью гасит панель, а утром её не зажигает: включают сами
+void test_screen_eco_morning_waits_for_button() {
+    ScreenSchedule sc;
+    ecoTick(sc, 1000, true, true);                                      // день
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, ecoTick(sc, 2000, false, true).action);  // 22:00
+    TEST_ASSERT_EQUAL(SCREEN_KEEP,     ecoTick(sc, 3000, true,  false).action); // 6:00
+    TEST_ASSERT_EQUAL(SCREEN_KEEP,     ecoTick(sc, 4000, true,  false).action);
+    TEST_ASSERT_EQUAL(SCREEN_REFUSED_NONE, sc.requestOn(5000, true, false, false, 30000));
+    TEST_ASSERT_FALSE(sc.peeking());                    // днём — без таймера
+}
+
+// И выключенную кнопкой днём панель эконом утром не трогает
+void test_screen_eco_manual_off_stays_off() {
+    ScreenSchedule sc;
+    ecoTick(sc, 1000, true, true);
+    sc.requestOff();
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, ecoTick(sc, 2000, true,  false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, ecoTick(sc, 3000, false, false).action);    // 22:00
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, ecoTick(sc, 4000, true,  false).action);    // 6:00
+}
+
+// Заряд вернулся выше рубежа — обычный режим зажигает панель сам, эконом
+// ждёт кнопки, как и после ночи
+void test_screen_battery_return_turns_on_only_in_normal() {
+    ScreenSchedule n;
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, normalTick(n, 1000, true, true,  false).action);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_ON,  normalTick(n, 2000, true, false, true).action);
+
+    ScreenSchedule e;
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, ecoTick(e, 1000, true, true,  false).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP,     ecoTick(e, 2000, true, false, true).action);
+}
+
+// Утро, наступившее в экономе, обычному режиму после переключения не
+// достаётся: иначе экран вспыхивал бы среди дня от давно прошедшего фронта
+void test_screen_morning_in_eco_not_replayed_in_normal() {
+    ScreenSchedule sc;
+    ecoTick(sc, 1000, false, false);                    // ночь в экономе
+    ecoTick(sc, 2000, true,  false);                    // 6:00, ждём кнопки
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, normalTick(sc, 3000, true, false).action);
 }
 
 // Ночное «посмотреть на часы»: панель держится подсветку и гаснет сама,
 // с отметкой для журнала
 void test_screen_peek_holds_then_expires() {
     ScreenSchedule sc;
-    sc.tick(1000, true, false, false);
+    ecoTick(sc, 1000, false, false);
     TEST_ASSERT_EQUAL(SCREEN_REFUSED_NONE, sc.requestOn(1000, true, false, true, 30000));
     TEST_ASSERT_TRUE(sc.peeking());
 
-    ScreenStep st = sc.tick(20000, true, false, true);
+    ScreenStep st = ecoTick(sc, 20000, false, true);
     TEST_ASSERT_EQUAL(SCREEN_KEEP, st.action);
     TEST_ASSERT_FALSE(st.peekExpired);
 
-    st = sc.tick(31000, true, false, true);
+    st = ecoTick(sc, 31000, false, true);
     TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, st.action);
     TEST_ASSERT_TRUE(st.peekExpired);
     TEST_ASSERT_FALSE(sc.peeking());
@@ -895,29 +957,29 @@ void test_screen_peek_holds_then_expires() {
 // и посреди неё, иначе полминуты OLED роняли бы устройство в brownout
 void test_screen_peek_does_not_beat_battery() {
     ScreenSchedule sc;
-    sc.tick(1000, true, false, false);
+    ecoTick(sc, 1000, false, false);
     sc.requestOn(1000, true, false, true, 30000);
-    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, sc.tick(2000, false, false, true).action);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, ecoTick(sc, 2000, false, true, false).action);
 }
 
-// Подсветка съедала фронт окна: если ночью смотрели на часы, утро для
-// экрана не наступало. Фронт считается до выхода по подсветке
-void test_screen_morning_after_night_peek() {
+// Ночной просмотр — это не «хочу экран утром»: подсветка истекла, и утро
+// эконома остаётся тёмным, как после любой ночи
+void test_screen_eco_night_peek_leaves_morning_dark() {
     ScreenSchedule sc;
-    sc.tick(1000, true, false, false);                  // ночь, панель тёмная
+    ecoTick(sc, 1000, false, false);                    // ночь, панель тёмная
     sc.requestOn(2000, true, false, true, 30000);
-    sc.tick(3000, true, false, true);                   // идёт подсветка
-    sc.tick(40000, true, false, true);                  // истекла, погасили
-    TEST_ASSERT_EQUAL(SCREEN_TURN_ON, sc.tick(50000, true, true, false).action);
+    ecoTick(sc, 3000, false, true);                     // идёт подсветка
+    ecoTick(sc, 40000, false, true);                    // истекла, погасили
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, ecoTick(sc, 50000, true, false).action);
 }
 
 // Час стал рабочим — отсчёт подсветки снимается, иначе дашборд обещал бы
 // гашение экрана, которое не случится
 void test_screen_window_open_clears_peek() {
     ScreenSchedule sc;
-    sc.tick(1000, true, false, false);
+    ecoTick(sc, 1000, false, false);
     sc.requestOn(1000, true, false, true, 30000);
-    sc.tick(2000, true, true, true);
+    ecoTick(sc, 2000, true, true);
     TEST_ASSERT_FALSE(sc.peeking());
     TEST_ASSERT_EQUAL_UINT32(0, sc.peekLeftS(2000));
 }
@@ -960,10 +1022,10 @@ void test_screen_peek_left_rounds_up() {
 void test_screen_peek_survives_millis_overflow() {
     ScreenSchedule sc;
     const uint32_t t0 = 0xFFFFF000UL;
-    sc.tick(t0, true, false, false);
+    ecoTick(sc, t0, false, false);
     sc.requestOn(t0, true, false, true, 30000);
-    TEST_ASSERT_EQUAL(SCREEN_KEEP, sc.tick(t0 + 10000UL, true, false, true).action);
-    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, sc.tick(t0 + 31000UL, true, false, true).action);
+    TEST_ASSERT_EQUAL(SCREEN_KEEP, ecoTick(sc, t0 + 10000UL, false, true).action);
+    TEST_ASSERT_EQUAL(SCREEN_TURN_OFF, ecoTick(sc, t0 + 31000UL, false, true).action);
 }
 
 // Конец подсветки, выпавший ровно на 0, не должен читаться как «подсветки нет»
@@ -1525,6 +1587,7 @@ int main(int argc, char** argv) {
 
     RUN_TEST(test_power_profile_names);
     RUN_TEST(test_power_profile_tightens_with_level);
+    RUN_TEST(test_power_profile_auto_on_only_in_normal);
     RUN_TEST(test_power_profile_bad_index_is_normal);
     RUN_TEST(test_window_plain);
     RUN_TEST(test_window_over_midnight);
@@ -1552,11 +1615,15 @@ int main(int argc, char** argv) {
 
     RUN_TEST(test_screen_window_close_turns_panel_off);
     RUN_TEST(test_screen_no_edge_on_first_step);
-    RUN_TEST(test_screen_window_open_turns_on_once);
-    RUN_TEST(test_screen_manual_off_by_day_returns_next_morning);
+    RUN_TEST(test_screen_normal_morning_turns_on_once);
+    RUN_TEST(test_screen_normal_manual_off_returns_next_morning);
+    RUN_TEST(test_screen_eco_morning_waits_for_button);
+    RUN_TEST(test_screen_eco_manual_off_stays_off);
+    RUN_TEST(test_screen_battery_return_turns_on_only_in_normal);
+    RUN_TEST(test_screen_morning_in_eco_not_replayed_in_normal);
     RUN_TEST(test_screen_peek_holds_then_expires);
     RUN_TEST(test_screen_peek_does_not_beat_battery);
-    RUN_TEST(test_screen_morning_after_night_peek);
+    RUN_TEST(test_screen_eco_night_peek_leaves_morning_dark);
     RUN_TEST(test_screen_window_open_clears_peek);
     RUN_TEST(test_screen_request_refused_on_battery);
     RUN_TEST(test_screen_request_refused_at_zero_brightness);
