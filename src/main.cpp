@@ -169,8 +169,13 @@ void applyAutoBrightness() {
     // Две причины гасить экран, и подсветка вправе перебить только одну.
     bool battOk  = powerScreenBatteryOkNow();
     bool schedOk = !haveHour || powerScreenScheduleAllowsNow(hour);
+    // Утро — по тем же часам, что и ночное окно, но в любом режиме: у
+    // обычного окна нет, а зажигать экран утром ему как раз и положено.
+    bool dayOk   = !haveHour
+                || hourInWindow(hour, POWER_NIGHT_OFF_HOUR, POWER_NIGHT_ON_HOUR);
 
-    ScreenStep s = screen.tick(millis(), battOk, schedOk, displayIsOn());
+    ScreenStep s = screen.tick(millis(), battOk, schedOk, dayOk,
+                               powerScreenAutoOnNow(), displayIsOn());
     if (s.peekExpired)                  Serial.println("Display: night peek expired");
     if (s.action == SCREEN_TURN_OFF)    displaySetPower(false);
     else if (s.action == SCREEN_TURN_ON) displaySetPower(true);

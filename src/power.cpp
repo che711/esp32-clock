@@ -197,3 +197,7 @@ bool powerScreenScheduleAllowsNow(int hour) {
     return powerScreenAllowed(mode, hour,
                               POWER_NIGHT_OFF_HOUR, POWER_NIGHT_ON_HOUR);
 }
+
+// От рабочего уровня, а не от выбранного, как и окно: под секундомером
+// часы живут по обычному профилю целиком.
+bool powerScreenAutoOnNow() { return powerProfile(mode).screenAutoOn; }
