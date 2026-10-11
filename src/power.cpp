@@ -201,3 +201,4 @@ bool powerScreenScheduleAllowsNow(int hour) {
 // От рабочего уровня, а не от выбранного, как и окно: под секундомером
 // часы живут по обычному профилю целиком.
 bool powerScreenAutoOnNow() { return powerProfile(mode).screenAutoOn; }
+

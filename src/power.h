@@ -53,3 +53,4 @@ void powerApplyRadio();
 // Интервал прослушивания — в конфиг STA между WiFi.begin(..., false) и
 // esp_wifi_connect(): после ассоциации точка доступа его уже не узнает.
 void powerPrepareAssociation();
+
